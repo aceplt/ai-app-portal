@@ -543,12 +543,17 @@ function onAdminPage() {
 }
 
 function route() {
-  const path = location.pathname;
-  const page = path.endsWith('apps.html') ? 'apps' :
-    path.endsWith('news.html') ? 'news' :
-      path.endsWith('submit.html') ? 'submit' :
-        path.endsWith('admin.html') ? 'admin' :
-          'index';
+  // Cloudflare Pages sometimes serves extensionless routes.
+  // Make routing tolerant to both `/apps.html` and `/apps`.
+  const rawPath = location.pathname || '/';
+  const path = rawPath.replace(/\/+$/, '');
+
+  const page =
+    path.endsWith('apps.html') || path.endsWith('apps') ? 'apps' :
+    path.endsWith('news.html') || path.endsWith('news') ? 'news' :
+    path.endsWith('submit.html') || path.endsWith('submit') ? 'submit' :
+    path.endsWith('admin.html') || path.endsWith('admin') ? 'admin' :
+    'index';
 
   if (page === 'index') return onIndexPage();
   if (page === 'news') return onNewsPage();
