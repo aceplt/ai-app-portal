@@ -465,7 +465,7 @@ function onSubmitPage() {
     subs.unshift(sub);
     saveSubmissions(subs);
 
-    status.textContent = 'Submitted ✅ Pending approval (demo voting enables auto-approve).';
+    status.textContent = 'Submitted ✅ Pending approval (demo voting enables auto-approve). Saved to this browser (localStorage).';
     form.reset();
 
     setTimeout(() => { location.href = './apps.html'; }, 800);
@@ -486,10 +486,10 @@ function onAdminPage() {
 
   const render = () => {
     const threshold = getAutoThreshold();
-    autoStatus.textContent = `Auto-approve demo is ON. Threshold: ${threshold} votes.`;
-
     const subs = loadSubmissions();
     const pending = subs.filter(s => s.status === 'pending');
+
+    autoStatus.textContent = `Auto-approve demo is ON. Threshold: ${threshold} votes. Local stored submissions: ${subs.length}. Pending: ${pending.length}.`;
 
     out.innerHTML = '';
     if (!pending.length) {
