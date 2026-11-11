@@ -1,0 +1,79 @@
+:root{
+  --bg: #0b1220;
+  --card: rgba(255,255,255,.06);
+  --card2: rgba(255,255,255,.08);
+  --text: #e8eefc;
+  --muted: rgba(232,238,252,.72);
+  --brand: #7c5cff;
+  --brand2: #31d0ff;
+  --border: rgba(255,255,255,.14);
+  --shadow: 0 10px 30px rgba(0,0,0,.35);
+  --radius: 16px;
+  --gap: 16px;
+}
+*{box-sizing:border-box}
+body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:var(--bg); color:var(--text)}
+a{color:inherit}
+.container{max-width:1080px; margin:0 auto; padding: 0 18px}
+.topbar{position:sticky; top:0; z-index:5; backdrop-filter: blur(10px); background: rgba(11,18,32,.7); border-bottom:1px solid var(--border)}
+.topbar-inner{display:flex; align-items:center; justify-content:space-between; padding:14px 0}
+.brand{font-weight:800; letter-spacing:.2px; text-decoration:none}
+.nav{display:flex; gap:12px; align-items:center}
+.nav a{color:var(--muted); text-decoration:none; padding:8px 10px; border-radius:12px}
+.nav a:hover{background:rgba(255,255,255,.06); color:var(--text)}
+.nav a.active{background:rgba(124,92,255,.18); color:var(--text)}
+.cta{background: linear-gradient(90deg, rgba(124,92,255,.35), rgba(49,208,255,.25)); color:var(--text)}
+.cta:hover{filter:brightness(1.05)}
+
+.hero{padding: 28px 0 18px}
+.hero h1{margin:0; font-size: clamp(26px, 3vw, 40px); line-height:1.08}
+.hero p{margin: 12px 0 0; color:var(--muted); max-width: 720px}
+.hero-actions{display:flex; gap:12px; margin-top:18px; flex-wrap:wrap}
+
+.card{background: var(--card); border:1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding:16px}
+.card-wide{margin-top:16px}
+.card-head{display:flex; align-items:center; justify-content:space-between; gap:14px}
+.card-head h1{margin:0}
+.card-head h2{margin:0; font-size:18px}
+
+.link{color: var(--brand2); text-decoration:none}
+
+.btn{display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:10px 14px; border-radius:14px; border:1px solid rgba(255,255,255,.18); background: rgba(124,92,255,.22); text-decoration:none; color:var(--text); font-weight:650}
+.btn:hover{filter:brightness(1.05)}
+.btn-ghost{background: transparent}
+.btn-small{padding:8px 12px; border-radius:12px}
+
+.grid-2{display:grid; grid-template-columns: 1fr 1fr; gap:16px}
+@media (max-width: 900px){.grid-2{grid-template-columns: 1fr}}
+
+.list{display:flex; flex-direction:column; gap:10px; margin-top:12px}
+.item{padding:12px; border-radius:14px; background: rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10)}
+.item-title{display:flex; justify-content:space-between; gap:10px; align-items:flex-start}
+.item-title a{font-weight:760; text-decoration:none}
+.item-meta{color:var(--muted); font-size:12px; margin-top:6px}
+.item-desc{color:var(--muted); margin-top:8px; line-height:1.4}
+
+.grid-cards{display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; margin-top:14px}
+@media (max-width: 760px){.grid-cards{grid-template-columns: 1fr}}
+.app-card{padding:14px; border-radius:14px; background: rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10)}
+.app-card h3{margin:0 0 6px; font-size:16px}
+.badges{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px}
+.badge{font-size:12px; padding:6px 10px; border-radius:999px; background: rgba(124,92,255,.18); border:1px solid rgba(124,92,255,.25); color: var(--text)}
+
+.filters{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+.input,.textarea,.select{width: 240px; max-width: 100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.04); color:var(--text); outline:none}
+.select{width: 220px}
+.textarea{resize: vertical; min-height: 120px}
+
+.form{display:flex; flex-direction:column; gap:12px; margin-top:10px}
+.form label{display:flex; flex-direction:column; gap:8px; color:var(--muted)}
+.form-row{display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:6px}
+.status{margin-top:12px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.04); color:var(--muted)}
+
+.steps{margin:0; padding-left: 18px; color:var(--muted)}
+.steps li{margin:10px 0; line-height:1.45}
+
+.footer{padding: 24px 0 30px}
+.muted{color:var(--muted)}
+
+.active{outline:2px solid rgba(124,92,255,.35)}

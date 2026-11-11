@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Submit App — AI Create App News</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="./index.html">AI Create App News</a>
+        <nav class="nav">
+          <a href="./index.html">Home</a>
+          <a href="./news.html">AI News</a>
+          <a href="./apps.html">Apps</a>
+          <a href="./submit.html" class="active cta">Submit App</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <div class="card-head">
+          <h1>Submit your app</h1>
+          <p class="muted">This demo stores submissions locally until you connect the backend.</p>
+        </div>
+
+        <form id="submitForm" class="form">
+          <label>
+            App name
+            <input name="name" class="input" required />
+          </label>
+
+          <label>
+            Short description
+            <textarea name="description" class="textarea" rows="4" required></textarea>
+          </label>
+
+          <label>
+            Languages (comma-separated)
+            <input name="languages" class="input" placeholder="Python, HTML, C++" required />
+          </label>
+
+          <label>
+            Tags (comma-separated)
+            <input name="tags" class="input" placeholder="web app, bot, game" />
+          </label>
+
+          <label>
+            GitHub URL
+            <input name="githubUrl" class="input" type="url" placeholder="https://github.com/..." />
+          </label>
+
+          <label>
+            Demo/Website URL
+            <input name="demoUrl" class="input" type="url" placeholder="https://..." />
+          </label>
+
+          <label>
+            Your name / handle
+            <input name="author" class="input" required />
+          </label>
+
+          <div class="form-row">
+            <button type="submit" class="btn">Submit</button>
+            <a class="btn btn-ghost" href="./apps.html">Back to apps</a>
+          </div>
+
+          <div id="submitStatus" class="status" role="status" aria-live="polite"></div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Admin</h2>
+        <p class="muted">When your backend is ready, approvals will happen here.</p>
+        <a class="btn btn-ghost" href="./admin.html">Open admin placeholder</a>
+      </section>
+
+      <footer class="footer">
+        <div class="muted">© <span id="year"></span> AI Create App News</div>
+      </footer>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
