@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Apps — AI Create App News</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="./index.html">AI Create App News</a>
+        <nav class="nav">
+          <a href="./index.html">Home</a>
+          <a href="./news.html">AI News</a>
+          <a href="./apps.html" class="active">Apps</a>
+          <a href="./submit.html" class="cta">Submit App</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <div class="card-head">
+          <h1>Apps Directory</h1>
+          <div class="filters">
+            <input id="appsQuery" class="input" placeholder="Search apps…" />
+            <select id="langFilter" class="select">
+              <option value="">All languages</option>
+            </select>
+            <button id="appsRefresh" class="btn btn-small">Refresh</button>
+          </div>
+        </div>
+
+        <div id="voteHint" class="status">
+          Upvote apps. In this demo, once an app reaches the auto-approve threshold it becomes <b>Approved</b> and appears in the main directory.
+        </div>
+
+        <div id="appsListFull" class="grid-cards"></div>
+      </section>
+
+      <footer class="footer">
+        <div class="muted">© <span id="year"></span> AI Create App News</div>
+      </footer>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+name = "aicreateappnews-backend"
+main = "src/index.ts"
+compatibility_date = "2026-11-11"
+workers_dev = false
+
+# TODO: set your Cloudflare account_id or let Wrangler prompt
+# account_id = "..."
+
+# Demo cron: adjust to something you want (e.g. hourly/daily)
+# For real ingestion, keep it under free-tier limits.
+crons = [
+  { name = "ingest_news", schedule = "0 */6 * * *" }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "aicreateappnews"
+# TODO: set database_id after you create the D1 database in Cloudflare
+# database_id = "..."

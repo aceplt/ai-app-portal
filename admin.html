@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin — AI Create App News</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="./index.html">AI Create App News</a>
+        <nav class="nav">
+          <a href="./index.html">Home</a>
+          <a href="./news.html">AI News</a>
+          <a href="./apps.html">Apps</a>
+          <a href="./submit.html" class="cta">Submit App</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <div class="card-head">
+          <h1>Admin (placeholder)</h1>
+          <p class="muted">Later: authentication + Workers endpoints. For now: local demo approvals driven by votes.</p>
+        </div>
+
+        <div class="status" id="autoStatus"></div>
+
+        <div class="form-row" style="margin-top:10px">
+          <label style="gap:8px">
+            Auto-approve threshold (votes)
+            <input id="thresholdInput" class="input" type="number" min="1" value="5" />
+          </label>
+          <button id="runAutoApprove" class="btn">Run auto-approve now</button>
+          <button id="clearDemo" class="btn btn-ghost">Clear local demo data</button>
+        </div>
+
+        <h2 style="margin-top:18px">Pending submissions</h2>
+        <div id="pendingList" class="list"></div>
+      </section>
+
+      <footer class="footer">
+        <div class="muted">© <span id="year"></span> AI Create App News</div>
+      </footer>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

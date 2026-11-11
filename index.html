@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Create App News</title>
+    <link rel="stylesheet" href="./style.css" />
+    <meta name="description" content="Latest AI news and community app submissions" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="./index.html">AI Create App News</a>
+        <nav class="nav">
+          <a href="./index.html">Home</a>
+          <a href="./news.html">AI News</a>
+          <a href="./apps.html">Apps</a>
+          <a href="./submit.html" class="cta">Submit App</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="hero">
+        <h1>Latest AI News + Community Apps</h1>
+        <p>Discover new models, tools, and the apps built with them. Submit your app and get featured when approved.</p>
+        <div class="hero-actions">
+          <a class="btn" href="./submit.html">Submit your app</a>
+          <a class="btn btn-ghost" href="./apps.html">Browse apps</a>
+        </div>
+      </section>
+
+      <section class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <h2>Latest AI News</h2>
+            <a class="link" href="./news.html">View all →</a>
+          </div>
+          <div id="newsList" class="list"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Latest Apps</h2>
+            <a class="link" href="./apps.html">View all →</a>
+          </div>
+          <div id="appsList" class="list"></div>
+        </div>
+      </section>
+
+      <section class="card card-wide">
+        <div class="card-head">
+          <h2>How it works</h2>
+        </div>
+        <ol class="steps">
+          <li>AI News auto-pulls from sources (after backend is connected).</li>
+          <li>Users submit apps with languages + links.</li>
+          <li>Admins approve submissions.</li>
+          <li>Approved apps appear in the directory.</li>
+        </ol>
+      </section>
+
+      <footer class="footer">
+        <div class="muted">© <span id="year"></span> AI Create App News</div>
+      </footer>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
