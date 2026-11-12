@@ -238,6 +238,22 @@ function getReviewStats(appId) {
   return { count: reviews.length, avg };
 }
 
+async function fetchGitHubSecurity(githubUrl) {
+  // Attempts to call the Workers endpoint. If Workers aren't connected yet,
+  // this will fail and we return a safe fallback.
+  try {
+    const resp = await fetch('/api/security-check?githubUrl=' + encodeURIComponent(githubUrl), {
+      method: 'GET',
+      headers: { 'accept': 'application/json' }
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) return { ok: false, error: data?.error || 'failed', securityConfidence: null };
+    return { ok: true, securityConfidence: data?.securityConfidence, raw: data };
+  } catch (e) {
+    return { ok: false, error: 'network/worker not connected', securityConfidence: null };
+  }
+}
+
 function getVoteCount(appId) {
   const votes = loadVotes();
   return Number(votes[appId] || 0);
@@ -470,6 +486,63 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
       reviewWrap.appendChild(ratingSel);
       reviewWrap.appendChild(reviewText);
       reviewWrap.appendChild(reviewBtn);
+
+      const securityBtn = el(
+        'button',
+        {
+          class: 'btn btn-small',
+          style: 'margin-top:8px',
+          disabled: alreadyReviewed || !app.githubUrl ? 'disabled' : undefined
+        },
+        ['Check GitHub security']
+      );
+
+      const secStatus = el('div', { class: 'item-meta', style: 'margin-top:6px; opacity:0.9' }, ['']);
+
+      securityBtn.addEventListener('click', async () => {
+        securityBtn.textContent = 'Checking...';
+        secStatus.textContent = 'Working...';
+
+        const res = await fetchGitHubSecurity(app.githubUrl);
+        if (!res.ok) {
+          secStatus.textContent = 'Could not check GitHub security yet.';
+          securityBtn.textContent = 'Check GitHub security';
+          return;
+        }
+
+        const rating = Number(res.securityConfidence);
+        if (!Number.isFinite(rating)) {
+          secStatus.textContent = 'No GitHub signal found.';
+          securityBtn.textContent = 'Check GitHub security';
+          return;
+        }
+
+        // Save as this user's security confidence review (counts toward auto-approve gate)
+        const userKey = ensureUserKey();
+        const reviews = loadReviews();
+
+        reviews.unshift({
+          appId: app.id,
+          rating,
+          text: 'Auto from GitHub security alerts (confidence).',
+          userKey,
+          author: 'you',
+          submittedAt: new Date().toISOString().slice(0, 10)
+        });
+        saveReviews(reviews);
+
+        const reviewedSet2 = loadReviewedSet();
+        reviewedSet2.add(app.id);
+        saveReviewedSet(reviewedSet2);
+
+        secStatus.textContent = `GitHub security confidence: ${rating}/5`;
+        securityBtn.textContent = 'GitHub checked ✅';
+
+        if (typeof onReview === 'function') onReview(app.id);
+      });
+
+      reviewWrap.appendChild(securityBtn);
+      reviewWrap.appendChild(secStatus);
 
       card.appendChild(reviewWrap);
     }

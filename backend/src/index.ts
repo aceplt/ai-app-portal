@@ -1,8 +1,6 @@
 import { NEWS_SOURCES } from './sources';
 import { autoApproveByVotes, listPendingSubmissions, upsertVote, voteCount } from './db';
-
-// Cloudflare Workers + D1 API skeleton (demo)
-// Real moderation/auth should use proper auth + user identity.
+import { getGitHubSecuritySignal } from './github';
 
 type Json = Record<string, any>;
 
@@ -33,11 +31,11 @@ export default {
       });
     }
 
-    // Example routing
     if (pathname === '/api/health') {
       return json({ ok: true, service: 'aicreateappnews-backend' });
     }
 
+    // --- News ---
     if (request.method === 'GET' && pathname === '/api/news') {
       const limit = Number(searchParams.get('limit') || 20);
       const source = searchParams.get('source') || null;
@@ -58,22 +56,36 @@ export default {
       });
     }
 
-    if (request.method === 'GET' && pathname === '/api/apps') {
-      const limit = Number(searchParams.get('limit') || 20);
+    // --- Security check (GitHub Dependabot + vulnerability alerts) ---
+    if (request.method === 'GET' && pathname === '/api/security-check') {
+      const githubUrl = String(searchParams.get('githubUrl') || '');
+      const token = env.GITHUB_TOKEN || '';
 
-      // TODO: query D1 submissions WHERE status='approved'
+      const signal = await getGitHubSecuritySignal(githubUrl, token);
+      if (!signal.ok) {
+        return json({ ok: false, error: signal.error || 'failed', repo: signal.repo }, { status: 400 });
+      }
+
       return json({
-        items: [],
-        limit
+        ok: true,
+        repo: signal.repo?.fullName,
+        openDependabotAlerts: signal.openDependabotAlerts,
+        openVulnerabilityAlerts: signal.openVulnerabilityAlerts,
+        securityConfidence: signal.securityConfidence
       });
     }
 
+    // --- Apps (approved list) ---
+    if (request.method === 'GET' && pathname === '/api/apps') {
+      const limit = Number(searchParams.get('limit') || 20);
+      // TODO: query D1 submissions WHERE status='approved'
+      return json({ items: [], limit });
+    }
+
+    // --- Submissions ---
     if (request.method === 'POST' && pathname === '/api/submissions') {
       const body = (await request.json().catch(() => null)) as Json | null;
       if (!body) return json({ ok: false, error: 'invalid json' }, { status: 400 });
-
-      // TODO: validate + sanitize
-      // TODO: enforce moderation/busting rules
 
       const submissionId = body.id || `sub_${Math.random().toString(16).slice(2)}`;
       const now = new Date().toISOString();
@@ -97,6 +109,7 @@ export default {
       return json({ ok: true, submissionId });
     }
 
+    // --- Votes (demo) ---
     if (request.method === 'POST' && pathname === '/api/votes') {
       const body = (await request.json().catch(() => null)) as Json | null;
       if (!body) return json({ ok: false, error: 'invalid json' }, { status: 400 });
@@ -113,6 +126,7 @@ export default {
       return json({ ok: true, submissionId, votes: count });
     }
 
+    // --- Admin ---
     if (request.method === 'GET' && pathname === '/api/admin/pending') {
       // TODO: auth
       const limit = Number(searchParams.get('limit') || 100);
@@ -133,17 +147,8 @@ export default {
 
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
     if (controller.cron === 'ingest_news') {
-      // In a real implementation:
-      // 1) Fetch each RSS/API
-      // 2) Extract top items
-      // 3) Deduplicate
-      // 4) Store in news_items in D1
-      // 5) Optionally summarize/normalize
-
-      // This is a safe placeholder.
       const now = new Date().toISOString();
       console.log(`[ingest_news] scheduled tick at ${now}. Sources:`, NEWS_SOURCES.map(s => s.id));
-
       // TODO: persist ingestion run metadata to D1.
     }
   }
