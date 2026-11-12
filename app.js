@@ -75,10 +75,14 @@ const STORAGE_REVIEWS_KEY = 'aicn_reviews';
 const STORAGE_REVIEWED_KEY = 'aicn_reviewed';
 const STORAGE_API_BASE_URL_KEY = 'aicn_api_base_url'; // optional override
 
+const DEFAULT_GITHUB_WORKER_BASE = 'https://aicreateappnews-backend.plural-sceptre.workers.dev';
+
 function getApiBaseUrl() {
   // If empty, use same-origin relative /api/... (requires Workers routing).
-  // If set (ex: https://my-worker.<acct>.workers.dev), we call that instead.
-  return String(localStorage.getItem(STORAGE_API_BASE_URL_KEY) || '').trim();
+  // If set (ex: https://<worker>.<acct>.workers.dev), we call that instead.
+  // For now we also default to the currently deployed workers.dev Worker.
+  const stored = String(localStorage.getItem(STORAGE_API_BASE_URL_KEY) || '').trim();
+  return stored || DEFAULT_GITHUB_WORKER_BASE;
 }
 
 function formatDate(s) {
@@ -250,14 +254,16 @@ async function fetchGitHubSecurity(githubUrl) {
   // this will fail and we return a safe fallback.
   try {
     const base0 = getApiBaseUrl();
-    // If user accidentally saved a value with /api at the end,
-    // strip it to avoid calling /api/api/security-check.
-    const base = base0
-      ? base0
-          .trim()
-          .replace(/\/+$/, '')
-          .replace(/\/api\/?$/, '')
-      : '';
+    // Normalize user input defensively.
+    let base = String(base0 || '').trim();
+    if (base) {
+      base = base.replace(/\/+$/, '');
+      // If they pasted full endpoint paths, strip them back to the base.
+      base = base.replace(/\/api\/security-check\/?$/, '');
+      base = base.replace(/\/api\/?$/, '');
+      // Handle accidental double /api
+      base = base.replace(/\/api\/api\/?$/, '/api');
+    }
 
     const apiUrl =
       (base ? base.replace(/\/+$/, '') : '') + '/api/security-check' +
