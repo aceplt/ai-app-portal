@@ -250,31 +250,35 @@ function getReviewStats(appId) {
 }
 
 async function fetchGitHubSecurity(githubUrl) {
-  // Attempts to call the Workers endpoint. If Workers aren't connected yet,
-  // this will fail and we return a safe fallback.
+  // Calls the Workers endpoint for GitHub security signal.
+  // We normalize the base to the Worker origin (scheme + host) so
+  // even if the user pastes /api or other paths, it still works.
   try {
     const base0 = getApiBaseUrl();
     let base = String(base0 || '').trim();
+    if (!base) base = DEFAULT_GITHUB_WORKER_BASE;
 
-    if (base) {
-      base = base.replace(/\/+$/, '');
-      // If they pasted full endpoint paths, strip them back to the base.
-      base = base.replace(/\/api\/security-check\/?$/, '');
-      // Remove trailing /api segments repeatedly (handles /api, /api/api, etc.)
-      while (/\/api\/?$/.test(base)) {
-        base = base.replace(/\/api\/?$/, '');
-        base = base.replace(/\/+$/, '');
-      }
+    // Normalize to origin.
+    try {
+      base = new URL(base).origin;
+    } catch {
+      // If base is not a full URL, fall back.
+      base = DEFAULT_GITHUB_WORKER_BASE;
+      try {
+        base = new URL(base).origin;
+      } catch {}
     }
 
     const apiUrl =
-      (base ? base.replace(/\/+$/, '') : '') + '/api/security-check' +
+      base.replace(/\/+$/, '') +
+      '/api/security-check' +
       '?githubUrl=' + encodeURIComponent(githubUrl);
 
     const resp = await fetch(apiUrl, {
       method: 'GET',
       headers: { 'accept': 'application/json' }
     });
+
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       return {
@@ -286,6 +290,7 @@ async function fetchGitHubSecurity(githubUrl) {
         raw: data
       };
     }
+
     return { ok: true, securityConfidence: data?.securityConfidence, raw: data };
   } catch (e) {
     return { ok: false, error: 'network/worker not connected', securityConfidence: null };
