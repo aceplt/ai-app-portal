@@ -254,15 +254,17 @@ async function fetchGitHubSecurity(githubUrl) {
   // this will fail and we return a safe fallback.
   try {
     const base0 = getApiBaseUrl();
-    // Normalize user input defensively.
     let base = String(base0 || '').trim();
+
     if (base) {
       base = base.replace(/\/+$/, '');
       // If they pasted full endpoint paths, strip them back to the base.
       base = base.replace(/\/api\/security-check\/?$/, '');
-      base = base.replace(/\/api\/?$/, '');
-      // Handle accidental double /api
-      base = base.replace(/\/api\/api\/?$/, '/api');
+      // Remove trailing /api segments repeatedly (handles /api, /api/api, etc.)
+      while (/\/api\/?$/.test(base)) {
+        base = base.replace(/\/api\/?$/, '');
+        base = base.replace(/\/+$/, '');
+      }
     }
 
     const apiUrl =
