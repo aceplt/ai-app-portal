@@ -70,6 +70,9 @@ const STORAGE_SUBMISSIONS_FALLBACK_KEY = 'aicn_pending_submissions';
 const STORAGE_VOTES_KEY = 'aicn_votes'; // { [appId]: number }
 const STORAGE_VOTED_KEY = 'aicn_voted'; // Set-ish array
 const STORAGE_AUTO_THRESHOLD_KEY = 'aicn_auto_threshold';
+const STORAGE_USER_KEY = 'aicn_user';
+const STORAGE_REVIEWS_KEY = 'aicn_reviews';
+const STORAGE_REVIEWED_KEY = 'aicn_reviewed';
 
 function formatDate(s) {
   try {
@@ -158,20 +161,138 @@ function setAutoThreshold(n) {
   localStorage.setItem(STORAGE_AUTO_THRESHOLD_KEY, String(n));
 }
 
+function getAutoMinReviews() {
+  const raw = localStorage.getItem('aicn_auto_min_reviews');
+  const n = raw ? Number(raw) : 10;
+  return Number.isFinite(n) && n >= 0 ? n : 10;
+}
+
+function setAutoMinReviews(n) {
+  localStorage.setItem('aicn_auto_min_reviews', String(n));
+}
+
+function getAutoMinAvgRating() {
+  const raw = localStorage.getItem('aicn_auto_min_avg_rating');
+  const n = raw ? Number(raw) : 4.0;
+  return Number.isFinite(n) && n > 0 ? n : 4.0;
+}
+
+function setAutoMinAvgRating(n) {
+  localStorage.setItem('aicn_auto_min_avg_rating', String(n));
+}
+
+function getAutoMinAgeHours() {
+  const raw = localStorage.getItem('aicn_auto_min_age_hours');
+  const n = raw ? Number(raw) : 2;
+  return Number.isFinite(n) && n >= 0 ? n : 2;
+}
+
+function setAutoMinAgeHours(n) {
+  localStorage.setItem('aicn_auto_min_age_hours', String(n));
+}
+
+function ensureUserKey() {
+  let v = localStorage.getItem(STORAGE_USER_KEY);
+  if (!v) {
+    v = 'user_' + Math.random().toString(16).slice(2) + '_' + Date.now().toString(16);
+    localStorage.setItem(STORAGE_USER_KEY, v);
+  }
+  return v;
+}
+
+function loadReviews() {
+  try {
+    const raw = localStorage.getItem(STORAGE_REVIEWS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReviews(reviews) {
+  localStorage.setItem(STORAGE_REVIEWS_KEY, JSON.stringify(reviews));
+}
+
+function loadReviewedSet() {
+  try {
+    const raw = localStorage.getItem(STORAGE_REVIEWED_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set(arr);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveReviewedSet(set) {
+  localStorage.setItem(STORAGE_REVIEWED_KEY, JSON.stringify([...set]));
+}
+
+function getReviewStats(appId) {
+  const reviews = loadReviews().filter(r => r.appId === appId);
+  if (!reviews.length) return { count: 0, avg: 0 };
+
+  let sum = 0;
+  for (const r of reviews) sum += Number(r.rating || 0);
+  const avg = sum / reviews.length;
+  return { count: reviews.length, avg };
+}
+
 function getVoteCount(appId) {
   const votes = loadVotes();
   return Number(votes[appId] || 0);
 }
 
-function autoApprovePending(threshold) {
+function getAutoConfig() {
+  return {
+    minVotes: getAutoThreshold(),
+    minReviews: getAutoMinReviews(),
+    minAvgRating: getAutoMinAvgRating(),
+    minAgeHours: getAutoMinAgeHours()
+  };
+}
+
+function shouldAutoApprove(submission, reviewStats, voteCount, cfg) {
+  if (submission.status !== 'pending') return false;
+  if (voteCount < cfg.minVotes) return false;
+  if (reviewStats.count < cfg.minReviews) return false;
+  if (reviewStats.avg < cfg.minAvgRating) return false;
+
+  if (submission.submittedAt) {
+    const ageMs = Date.now() - new Date(submission.submittedAt).getTime();
+    const ageHours = Number.isFinite(ageMs) ? ageMs / 3600000 : 0;
+    if (ageHours < cfg.minAgeHours) return false;
+  }
+
+  return true;
+}
+
+function autoApprovePending(cfg) {
   const subs = loadSubmissions();
   const votes = loadVotes();
-  let changed = false;
+  const reviews = loadReviews();
 
+  // Pre-group reviews by appId for speed
+  const reviewByApp = new Map();
+  for (const r of reviews) {
+    if (!reviewByApp.has(r.appId)) reviewByApp.set(r.appId, []);
+    reviewByApp.get(r.appId).push(r);
+  }
+
+  const reviewStatsByApp = new Map();
+  for (const [appId, list] of reviewByApp.entries()) {
+    let sum = 0;
+    for (const r of list) sum += Number(r.rating || 0);
+    const avg = list.length ? sum / list.length : 0;
+    reviewStatsByApp.set(appId, { count: list.length, avg });
+  }
+
+  let changed = false;
   const next = subs.map(s => {
     if (s.status !== 'pending') return s;
-    const count = Number(votes[s.id] || 0);
-    if (count >= threshold) {
+    const vc = Number(votes[s.id] || 0);
+    const rs = reviewStatsByApp.get(s.id) || { count: 0, avg: 0 };
+    if (shouldAutoApprove(s, rs, vc, cfg)) {
       changed = true;
       return { ...s, status: 'approved' };
     }
@@ -219,7 +340,7 @@ function renderNews(list, container) {
   });
 }
 
-function renderApps(list, container, { enableVoting = false, onVote = null } = {}) {
+function renderApps(list, container, { enableVoting = false, onVote = null, onReview = null } = {}) {
   container.innerHTML = '';
 
   list.forEach(app => {
@@ -233,7 +354,12 @@ function renderApps(list, container, { enableVoting = false, onVote = null } = {
     card.appendChild(el('div', { class: 'item-meta' }, [metaPieces.join(' · ') || '']));
 
     const badges = el('div', { class: 'badges' });
-    badges.appendChild(el('span', { class: 'badge' }, [app.status === 'approved' ? 'Approved' : 'Pending']));
+    badges.appendChild(el('span', { class:'badge' }, [app.status === 'approved' ? 'Approved' : 'Pending']));
+
+    const rs = getReviewStats(app.id);
+    if (rs.count > 0) {
+      badges.appendChild(el('span', { class:'badge' }, [`${rs.avg.toFixed(1)}★ Sec (${rs.count} reviews)`]));
+    }
     if (enableVoting) {
       badges.appendChild(el('span', { class: 'badge' }, [getVoteCount(app.id) + ' votes']));
     }
@@ -260,6 +386,7 @@ function renderApps(list, container, { enableVoting = false, onVote = null } = {
     if (enableVoting) {
       const voted = loadVoted();
       const already = voted.has(app.id);
+      const cfg = getAutoConfig();
 
       const voteRow = el('div', { class: 'form-row', style: 'margin-top:12px' });
       const voteBtn = el('button', { class: 'btn btn-small', disabled: already ? 'disabled' : undefined }, [already ? 'Voted ✅' : 'Upvote']);
@@ -274,8 +401,77 @@ function renderApps(list, container, { enableVoting = false, onVote = null } = {
       });
 
       voteRow.appendChild(voteBtn);
-      voteRow.appendChild(el('div', { class: 'item-meta', style: 'margin-left:10px' }, [`Auto-approve at ${getAutoThreshold()} votes (demo).`]));
+      voteRow.appendChild(
+        el('div', { class: 'item-meta', style: 'margin-left:10px' }, [
+          `Auto-approve demo: votes ≥ ${cfg.minVotes}, reviews ≥ ${cfg.minReviews}, rating ≥ ${cfg.minAvgRating}`
+        ]
+      ));
       card.appendChild(voteRow);
+
+      const reviewedSet = loadReviewedSet();
+      const alreadyReviewed = reviewedSet.has(app.id);
+
+      const reviewWrap = el('div', {
+        class: 'form-row',
+        style: 'margin-top:12px; flex-direction:column; align-items:stretch; gap:8px'
+      });
+
+      reviewWrap.appendChild(el('div', { class: 'item-meta' }, ['Security confidence (1–5):']));
+
+      const ratingSel = document.createElement('select');
+      ratingSel.className = 'select';
+      for (let i = 1; i <= 5; i++) {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = String(i);
+        if (i === 5) opt.selected = true;
+        ratingSel.appendChild(opt);
+      }
+
+      const reviewText = document.createElement('textarea');
+      reviewText.className = 'textarea';
+      reviewText.rows = 3;
+      reviewText.placeholder = 'Risk notes (why you trust/don’t trust this app)';
+
+      const reviewBtn = el(
+        'button',
+        { class: 'btn btn-small', disabled: alreadyReviewed ? 'disabled' : undefined },
+        [alreadyReviewed ? 'Reviewed ✅' : 'Submit review']
+      );
+
+      reviewBtn.addEventListener('click', () => {
+        if (alreadyReviewed) return;
+
+        const rating = Number(ratingSel.value);
+        const text = String(reviewText.value || '').trim();
+        if (!Number.isFinite(rating) || rating < 1 || rating > 5) return;
+        if (text.length < 5) return;
+
+        const userKey = ensureUserKey();
+        const reviews = loadReviews();
+        reviews.unshift({
+          appId: app.id,
+          rating,
+          text,
+          userKey,
+          author: 'you',
+          submittedAt: new Date().toISOString().slice(0, 10)
+        });
+        saveReviews(reviews);
+
+        reviewedSet.add(app.id);
+        saveReviewedSet(reviewedSet);
+
+        if (typeof onReview === 'function') onReview(app.id);
+
+        reviewText.value = '';
+      });
+
+      reviewWrap.appendChild(ratingSel);
+      reviewWrap.appendChild(reviewText);
+      reviewWrap.appendChild(reviewBtn);
+
+      card.appendChild(reviewWrap);
     }
 
     container.appendChild(card);
@@ -359,7 +555,7 @@ function onAppsPage() {
   if (year) year.textContent = new Date().getFullYear();
 
   // Apply on visit (demo auto-approve)
-  autoApprovePending(getAutoThreshold());
+  autoApprovePending(getAutoConfig())
 
   const query = document.getElementById('appsQuery');
   const lang = document.getElementById('langFilter');
@@ -381,7 +577,7 @@ function onAppsPage() {
   }
 
   const apply = () => {
-    autoApprovePending(getAutoThreshold());
+    autoApprovePending(getAutoConfig())
 
     const { approved: ap, pending: pn } = getAllApps();
     const merged = [...pn, ...ap];
@@ -416,7 +612,11 @@ function onAppsPage() {
         voted.add(appId);
         saveVoted(voted);
 
-        autoApprovePending(getAutoThreshold());
+        autoApprovePending(getAutoConfig())
+        apply();
+      },
+      onReview: () => {
+        autoApprovePending(getAutoConfig());
         apply();
       }
     });
@@ -481,15 +681,24 @@ function onAdminPage() {
 
   const autoStatus = document.getElementById('autoStatus');
   const thresholdInput = document.getElementById('thresholdInput');
+  const minReviewsInput = document.getElementById('minReviewsInput');
+  const minRatingInput = document.getElementById('minRatingInput');
+  const minAgeHoursInput = document.getElementById('minAgeHoursInput');
   const runBtn = document.getElementById('runAutoApprove');
   const clearBtn = document.getElementById('clearDemo');
 
   const render = () => {
-    const threshold = getAutoThreshold();
+    const cfg = getAutoConfig();
     const subs = loadSubmissions();
     const pending = subs.filter(s => s.status === 'pending');
 
-    autoStatus.textContent = `Auto-approve demo is ON. Threshold: ${threshold} votes. Local stored submissions: ${subs.length}. Pending: ${pending.length}.`;
+    autoStatus.textContent =
+      `Auto-approve demo is ON. ` +
+      `Min votes: ${cfg.minVotes}, ` +
+      `Min reviews: ${cfg.minReviews}, ` +
+      `Avg security confidence ≥ ${cfg.minAvgRating}, ` +
+      `Min age: ${cfg.minAgeHours}h. ` +
+      `Local stored submissions: ${subs.length}. Pending: ${pending.length}.`;
 
     out.innerHTML = '';
     if (!pending.length) {
@@ -510,24 +719,46 @@ function onAdminPage() {
       row.appendChild(el('div', { class: 'item-meta' }, ['Author: ' + (item.author || '-') ]));
 
       const votes = getVoteCount(item.id);
-      row.appendChild(el('div', { class: 'item-meta' }, [`Votes: ${votes} (need ${threshold})`]));
+      row.appendChild(el('div', { class: 'item-meta' }, [`Votes: ${votes} (need ${cfg.minVotes})`]));
+      const rs = getReviewStats(item.id);
+      row.appendChild(el('div', { class: 'item-meta' }, [`Reviews: ${rs.count} (need ${cfg.minReviews})`]));
+      row.appendChild(el('div', { class: 'item-meta' }, [`Avg security confidence: ${rs.avg.toFixed(1)} (need ${cfg.minAvgRating})`]));
 
       out.appendChild(row);
     });
   };
 
   if (thresholdInput) thresholdInput.value = String(getAutoThreshold());
+  if (minReviewsInput) minReviewsInput.value = String(getAutoMinReviews());
+  if (minRatingInput) minRatingInput.value = String(getAutoMinAvgRating());
+  if (minAgeHoursInput) minAgeHoursInput.value = String(getAutoMinAgeHours());
 
-  if (thresholdInput) {
-    thresholdInput.addEventListener('change', () => {
-      const n = Number(thresholdInput.value);
-      if (Number.isFinite(n) && n > 0) setAutoThreshold(n);
-      render();
-    });
-  }
+  thresholdInput?.addEventListener('change', () => {
+    const n = Number(thresholdInput.value);
+    if (Number.isFinite(n) && n > 0) setAutoThreshold(n);
+    render();
+  });
+
+  minReviewsInput?.addEventListener('change', () => {
+    const n = Number(minReviewsInput.value);
+    if (Number.isFinite(n) && n >= 0) setAutoMinReviews(n);
+    render();
+  });
+
+  minRatingInput?.addEventListener('change', () => {
+    const n = Number(minRatingInput.value);
+    if (Number.isFinite(n) && n > 0) setAutoMinAvgRating(n);
+    render();
+  });
+
+  minAgeHoursInput?.addEventListener('change', () => {
+    const n = Number(minAgeHoursInput.value);
+    if (Number.isFinite(n) && n >= 0) setAutoMinAgeHours(n);
+    render();
+  });
 
   runBtn?.addEventListener('click', () => {
-    autoApprovePending(getAutoThreshold());
+    autoApprovePending(getAutoConfig());
     render();
   });
 
@@ -535,7 +766,12 @@ function onAdminPage() {
     localStorage.removeItem(STORAGE_SUBMISSIONS_KEY);
     localStorage.removeItem(STORAGE_VOTES_KEY);
     localStorage.removeItem(STORAGE_VOTED_KEY);
+    localStorage.removeItem(STORAGE_REVIEWS_KEY);
+    localStorage.removeItem(STORAGE_REVIEWED_KEY);
     localStorage.removeItem(STORAGE_AUTO_THRESHOLD_KEY);
+    localStorage.removeItem('aicn_auto_min_reviews');
+    localStorage.removeItem('aicn_auto_min_avg_rating');
+    localStorage.removeItem('aicn_auto_min_age_hours');
     location.reload();
   });
 

@@ -23,18 +23,36 @@
       <section class="card">
         <div class="card-head">
           <h1>Admin (placeholder)</h1>
-          <p class="muted">Later: authentication + Workers endpoints. For now: local demo approvals driven by votes.</p>
+          <p class="muted">Local demo auto-approvals using votes + ratings + review count.</p>
         </div>
 
         <div class="status" id="autoStatus"></div>
 
-        <div class="form-row" style="margin-top:10px">
-          <label style="gap:8px">
-            Auto-approve threshold (votes)
-            <input id="thresholdInput" class="input" type="number" min="1" value="5" />
+        <div class="form-row" style="margin-top:10px; align-items:flex-start; flex-wrap:wrap;">
+          <label style="gap:8px; min-width: 220px">
+            Min votes (auto-approve)
+            <input id="thresholdInput" class="input" type="number" min="1" value="25" />
           </label>
-          <button id="runAutoApprove" class="btn">Run auto-approve now</button>
-          <button id="clearDemo" class="btn btn-ghost">Clear local demo data</button>
+
+          <label style="gap:8px; min-width: 220px">
+            Min reviews (auto-approve)
+            <input id="minReviewsInput" class="input" type="number" min="1" value="10" />
+          </label>
+
+          <label style="gap:8px; min-width: 220px">
+            Min average rating (1–5)
+            <input id="minRatingInput" class="input" type="number" step="0.1" min="1" max="5" value="4" />
+          </label>
+
+          <label style="gap:8px; min-width: 220px">
+            Min age before approval (hours)
+            <input id="minAgeHoursInput" class="input" type="number" min="0" value="2" />
+          </label>
+
+          <div style="display:flex; flex-direction:column; gap:10px; margin-left:auto;">
+            <button id="runAutoApprove" class="btn">Run auto-approve now</button>
+            <button id="clearDemo" class="btn btn-ghost">Clear local demo data</button>
+          </div>
         </div>
 
         <h2 style="margin-top:18px">Pending submissions</h2>
@@ -49,3 +67,4 @@
     <script type="module" src="./app.js"></script>
   </body>
 </html>
+
