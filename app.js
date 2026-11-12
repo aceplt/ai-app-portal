@@ -271,8 +271,7 @@ async function fetchGitHubSecurity(githubUrl) {
       '?githubUrl=' + encodeURIComponent(githubUrl);
 
     const resp = await fetch(apiUrl, {
-      method: 'GET',
-      headers: { 'accept': 'application/json' }
+      method: 'GET'
     });
 
     const data = await resp.json().catch(() => ({}));
