@@ -249,11 +249,18 @@ async function fetchGitHubSecurity(githubUrl) {
   // Attempts to call the Workers endpoint. If Workers aren't connected yet,
   // this will fail and we return a safe fallback.
   try {
-    const base = getApiBaseUrl();
+    const base0 = getApiBaseUrl();
+    // If user accidentally saved a value with /api at the end,
+    // strip it to avoid calling /api/api/security-check.
+    const base = base0
+      ? base0
+          .trim()
+          .replace(/\/+$/, '')
+          .replace(/\/api\/?$/, '')
+      : '';
+
     const apiUrl =
-      (base
-        ? base.replace(/\/+$/, '') + '/api/security-check'
-        : '/api/security-check') +
+      (base ? base.replace(/\/+$/, '') : '') + '/api/security-check' +
       '?githubUrl=' + encodeURIComponent(githubUrl);
 
     const resp = await fetch(apiUrl, {
@@ -822,9 +829,15 @@ function onAdminPage() {
   if (minAgeHoursInput) minAgeHoursInput.value = String(getAutoMinAgeHours());
   if (apiBaseInput) apiBaseInput.value = getApiBaseUrl();
 
-  apiBaseInput?.addEventListener('change', () => {
-    localStorage.setItem(STORAGE_API_BASE_URL_KEY, String(apiBaseInput.value || '').trim());
-  });
+  const saveApiBase = () => {
+    localStorage.setItem(
+      STORAGE_API_BASE_URL_KEY,
+      String(apiBaseInput?.value || '').trim()
+    );
+  };
+  apiBaseInput?.addEventListener('input', saveApiBase);
+  apiBaseInput?.addEventListener('change', saveApiBase);
+  apiBaseInput?.addEventListener('blur', saveApiBase);
 
   thresholdInput?.addEventListener('change', () => {
     const n = Number(thresholdInput.value);
