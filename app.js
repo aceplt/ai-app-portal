@@ -251,6 +251,8 @@ function getReviewStats(appId) {
 
 async function fetchGitHubSecurity(githubUrl) {
   // Calls the Workers endpoint for GitHub security signal.
+  let apiUrl = '';
+
   try {
     const base0 = getApiBaseUrl();
     let base = String(base0 || '').trim();
@@ -291,6 +293,7 @@ async function fetchGitHubSecurity(githubUrl) {
       ok: false,
       error: 'network/worker not connected',
       securityConfidence: null,
+      apiUrl,
       debug: String(e || 'unknown error')
     };
   }
