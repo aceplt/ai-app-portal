@@ -251,25 +251,19 @@ function getReviewStats(appId) {
 
 async function fetchGitHubSecurity(githubUrl) {
   // Calls the Workers endpoint for GitHub security signal.
-  // We normalize the base to the Worker origin (scheme + host) so
-  // even if the user pastes /api or other paths, it still works.
   try {
     const base0 = getApiBaseUrl();
     let base = String(base0 || '').trim();
+
+    // Fallback to the known deployed worker origin.
     if (!base) base = DEFAULT_GITHUB_WORKER_BASE;
 
-    // Normalize to origin.
-    try {
-      base = new URL(base).origin;
-    } catch {
-      // If base is not a full URL, fall back.
-      base = DEFAULT_GITHUB_WORKER_BASE;
-      try {
-        base = new URL(base).origin;
-      } catch {}
-    }
+    // Normalize: remove trailing slashes and common user mistakes.
+    base = base.replace(/\/+$/, '');
+    base = base.replace(/\/api\/security-check\/?$/, '');
+    base = base.replace(/\/api\/?$/, '');
 
-    const apiUrl =
+    let apiUrl =
       base.replace(/\/+$/, '') +
       '/api/security-check' +
       '?githubUrl=' + encodeURIComponent(githubUrl);
@@ -293,7 +287,12 @@ async function fetchGitHubSecurity(githubUrl) {
 
     return { ok: true, securityConfidence: data?.securityConfidence, raw: data };
   } catch (e) {
-    return { ok: false, error: 'network/worker not connected', securityConfidence: null };
+    return {
+      ok: false,
+      error: 'network/worker not connected',
+      securityConfidence: null,
+      debug: String(e || 'unknown error')
+    };
   }
 }
 
@@ -550,7 +549,8 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
         if (!res.ok) {
           const detail = res?.status ? ` (${res.status})` : '';
           const urlLine = res?.apiUrl ? `\nURL: ${res.apiUrl}` : '';
-          secStatus.textContent = `Worker call failed${detail}: ${res.error || 'failed'}${urlLine}`;
+          const debugLine = res?.debug ? `\nDebug: ${res.debug}` : '';
+          secStatus.textContent = `Worker call failed${detail}: ${res.error || 'failed'}${urlLine}${debugLine}`;
           securityBtn.textContent = 'Check GitHub security';
           return;
         }
