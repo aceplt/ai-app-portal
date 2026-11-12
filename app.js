@@ -274,7 +274,16 @@ async function fetchGitHubSecurity(githubUrl) {
       headers: { 'accept': 'application/json' }
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) return { ok: false, error: data?.error || 'failed', securityConfidence: null };
+    if (!resp.ok) {
+      return {
+        ok: false,
+        error: data?.error || 'failed',
+        securityConfidence: null,
+        status: resp.status,
+        apiUrl,
+        raw: data
+      };
+    }
     return { ok: true, securityConfidence: data?.securityConfidence, raw: data };
   } catch (e) {
     return { ok: false, error: 'network/worker not connected', securityConfidence: null };
@@ -532,7 +541,9 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
 
         const res = await fetchGitHubSecurity(app.githubUrl);
         if (!res.ok) {
-          secStatus.textContent = 'Could not check GitHub security yet.';
+          const detail = res?.status ? ` (${res.status})` : '';
+          const urlLine = res?.apiUrl ? `\nURL: ${res.apiUrl}` : '';
+          secStatus.textContent = `Worker call failed${detail}: ${res.error || 'failed'}${urlLine}`;
           securityBtn.textContent = 'Check GitHub security';
           return;
         }
