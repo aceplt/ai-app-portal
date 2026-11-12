@@ -250,28 +250,27 @@ function getReviewStats(appId) {
 }
 
 async function fetchGitHubSecurity(githubUrl) {
-  // Calls the Workers endpoint for GitHub security signal.
+  // Always call the known deployed worker origin.
+  // This avoids failures caused by bad/truncated localStorage values.
   let apiUrl = '';
-
   try {
-    const base0 = getApiBaseUrl();
-    let base = String(base0 || '').trim();
+    const origin = (() => {
+      try {
+        return new URL(DEFAULT_GITHUB_WORKER_BASE).origin;
+      } catch {
+        return DEFAULT_GITHUB_WORKER_BASE;
+      }
+    })();
 
-    // Fallback to the known deployed worker origin.
-    if (!base) base = DEFAULT_GITHUB_WORKER_BASE;
-
-    // Normalize: remove trailing slashes and common user mistakes.
-    base = base.replace(/\/+$/, '');
-    base = base.replace(/\/api\/security-check\/?$/, '');
-    base = base.replace(/\/api\/?$/, '');
-
-    let apiUrl =
-      base.replace(/\/+$/, '') +
+    apiUrl =
+      origin.replace(/\/+$/, '') +
       '/api/security-check' +
       '?githubUrl=' + encodeURIComponent(githubUrl);
 
     const resp = await fetch(apiUrl, {
-      method: 'GET'
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-store'
     });
 
     const data = await resp.json().catch(() => ({}));
@@ -286,7 +285,7 @@ async function fetchGitHubSecurity(githubUrl) {
       };
     }
 
-    return { ok: true, securityConfidence: data?.securityConfidence, raw: data };
+    return { ok: true, securityConfidence: data?.securityConfidence, raw: data, apiUrl };
   } catch (e) {
     return {
       ok: false,
