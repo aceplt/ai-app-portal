@@ -10,7 +10,8 @@ function json(body: any, init: ResponseInit = {}): Response {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'access-control-allow-origin': '*',
-      'access-control-allow-headers': 'content-type',
+      'access-control-allow-methods': 'GET,POST,OPTIONS',
+      'access-control-allow-headers': 'content-type, accept',
       ...(init.headers || {})
     }
   });
@@ -28,7 +29,7 @@ export default {
         headers: {
           'access-control-allow-origin': '*',
           'access-control-allow-methods': 'GET,POST,OPTIONS',
-          'access-control-allow-headers': 'content-type'
+          'access-control-allow-headers': 'content-type, accept'
         }
       });
     }
