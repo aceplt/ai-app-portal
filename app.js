@@ -73,6 +73,13 @@ const STORAGE_AUTO_THRESHOLD_KEY = 'aicn_auto_threshold';
 const STORAGE_USER_KEY = 'aicn_user';
 const STORAGE_REVIEWS_KEY = 'aicn_reviews';
 const STORAGE_REVIEWED_KEY = 'aicn_reviewed';
+const STORAGE_API_BASE_URL_KEY = 'aicn_api_base_url'; // optional override
+
+function getApiBaseUrl() {
+  // If empty, use same-origin relative /api/... (requires Workers routing).
+  // If set (ex: https://my-worker.<acct>.workers.dev), we call that instead.
+  return String(localStorage.getItem(STORAGE_API_BASE_URL_KEY) || '').trim();
+}
 
 function formatDate(s) {
   try {
@@ -242,7 +249,14 @@ async function fetchGitHubSecurity(githubUrl) {
   // Attempts to call the Workers endpoint. If Workers aren't connected yet,
   // this will fail and we return a safe fallback.
   try {
-    const resp = await fetch('/api/security-check?githubUrl=' + encodeURIComponent(githubUrl), {
+    const base = getApiBaseUrl();
+    const apiUrl =
+      (base
+        ? base.replace(/\/+$/, '') + '/api/security-check'
+        : '/api/security-check') +
+      '?githubUrl=' + encodeURIComponent(githubUrl);
+
+    const resp = await fetch(apiUrl, {
       method: 'GET',
       headers: { 'accept': 'application/json' }
     });
@@ -759,6 +773,7 @@ function onAdminPage() {
   const minAgeHoursInput = document.getElementById('minAgeHoursInput');
   const runBtn = document.getElementById('runAutoApprove');
   const clearBtn = document.getElementById('clearDemo');
+  const apiBaseInput = document.getElementById('apiBaseInput');
 
   const render = () => {
     const cfg = getAutoConfig();
@@ -805,6 +820,11 @@ function onAdminPage() {
   if (minReviewsInput) minReviewsInput.value = String(getAutoMinReviews());
   if (minRatingInput) minRatingInput.value = String(getAutoMinAvgRating());
   if (minAgeHoursInput) minAgeHoursInput.value = String(getAutoMinAgeHours());
+  if (apiBaseInput) apiBaseInput.value = getApiBaseUrl();
+
+  apiBaseInput?.addEventListener('change', () => {
+    localStorage.setItem(STORAGE_API_BASE_URL_KEY, String(apiBaseInput.value || '').trim());
+  });
 
   thresholdInput?.addEventListener('change', () => {
     const n = Number(thresholdInput.value);
@@ -845,6 +865,7 @@ function onAdminPage() {
     localStorage.removeItem('aicn_auto_min_reviews');
     localStorage.removeItem('aicn_auto_min_avg_rating');
     localStorage.removeItem('aicn_auto_min_age_hours');
+    localStorage.removeItem(STORAGE_API_BASE_URL_KEY);
     location.reload();
   });
 
