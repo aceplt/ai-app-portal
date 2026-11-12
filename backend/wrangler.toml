@@ -1,7 +1,7 @@
 name = "aicreateappnews-backend"
 main = "src/index.ts"
 compatibility_date = "2026-11-11"
-workers_dev = false
+workers_dev = true
 
 # TODO: set your Cloudflare account_id or let Wrangler prompt
 # account_id = "..."
@@ -12,8 +12,7 @@ crons = [
   { name = "ingest_news", schedule = "0 */6 * * *" }
 ]
 
-[[d1_databases]]
-binding = "DB"
-database_name = "aicreateappnews"
-# TODO: set database_id after you create the D1 database in Cloudflare
-# database_id = "..."
+# NOTE: Temporarily omitted D1 binding so we can deploy the Worker to
+# workers.dev without needing D1 permissions.
+# Re-add the D1 binding later when you want submissions/news storage.
+
