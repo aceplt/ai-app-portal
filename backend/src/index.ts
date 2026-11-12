@@ -9,6 +9,8 @@ function json(body: any, init: ResponseInit = {}): Response {
     ...init,
     headers: {
       'content-type': 'application/json; charset=utf-8',
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': 'content-type',
       ...(init.headers || {})
     }
   });
