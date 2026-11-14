@@ -896,9 +896,9 @@ function onSubmitPage() {
     const file = screenshotInput?.files?.[0] || null;
     let screenshotDataUrl = null;
     if (file) {
-      const maxBytes = 750 * 1024;
+      const maxBytes = 40 * 1024; // keep small for D1 row safety
       if (file.size > maxBytes) {
-        status.textContent = 'Screenshot is too large. Upload an image under ~750KB.';
+        status.textContent = 'Screenshot is too large. Upload an image under ~40KB.';
         return;
       }
       status.textContent = 'Uploading screenshot...';
@@ -930,7 +930,45 @@ function onSubmitPage() {
     subs.unshift(sub);
     saveSubmissions(subs);
 
-    status.textContent = 'Submitted ✅ Pending approval (demo voting enables auto-approve). Saved to this browser (localStorage).';
+    // Best-effort: also save to backend DB (if D1 is configured)
+    (async () => {
+      try {
+        const apiBase = getApiBaseUrl();
+        if (!apiBase) return;
+
+        const resp = await fetch(apiBase.replace(/\/+$/, '') + '/api/submissions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            id: sub.id,
+            name: sub.name,
+            description: sub.description,
+            languages: sub.languages,
+            tags: sub.tags,
+            githubUrl: sub.githubUrl,
+            demoUrl: sub.demoUrl,
+            screenshotDataUrl: sub.screenshotDataUrl,
+            author: sub.author,
+            submittedAt: sub.submittedAt
+          })
+        });
+
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data?.submissionId) {
+          // Update local copy with backend id
+          const current = loadSubmissions();
+          const idx = current.findIndex(x => x.id === sub.id);
+          if (idx >= 0) {
+            current[idx] = { ...current[idx], id: data.submissionId, status: 'pending' };
+            saveSubmissions(current);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    })();
+
+    status.textContent = 'Submitted ✅ Pending approval (demo voting). Saved locally';
     form.reset();
 
     setTimeout(() => { location.href = './apps.html'; }, 800);

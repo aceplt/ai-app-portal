@@ -8,6 +8,7 @@ export type SubmissionRow = {
   tags: string; // stored as comma-separated (demo)
   githubUrl: string | null;
   demoUrl: string | null;
+  screenshotDataUrl: string | null;
   author: string;
   submittedAt: string;
   status: 'pending' | 'approved';

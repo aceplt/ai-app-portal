@@ -81,8 +81,33 @@ export default {
     // --- Apps (approved list) ---
     if (request.method === 'GET' && pathname === '/api/apps') {
       const limit = Number(searchParams.get('limit') || 20);
-      // TODO: query D1 submissions WHERE status='approved'
-      return json({ items: [], limit });
+      if (!env.DB) {
+        return json({ items: [], limit });
+      }
+
+      const status = String(searchParams.get('status') || 'approved');
+      const res = await env.DB.prepare(
+        `SELECT * FROM submissions
+         WHERE status = ?
+         ORDER BY submittedAt DESC
+         LIMIT ?`
+      ).bind(status, limit).all();
+
+      const items = (res.results as any[]).map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        languages: String(r.languages || '').split(',').filter(Boolean),
+        tags: String(r.tags || '').split(',').filter(Boolean),
+        githubUrl: r.githubUrl || null,
+        demoUrl: r.demoUrl || null,
+        screenshotDataUrl: r.screenshotDataUrl || null,
+        author: r.author,
+        submittedAt: r.submittedAt,
+        status: r.status
+      }));
+
+      return json({ items, limit });
     }
 
     // --- Submissions ---
@@ -90,13 +115,17 @@ export default {
       const body = (await request.json().catch(() => null)) as Json | null;
       if (!body) return json({ ok: false, error: 'invalid json' }, { status: 400 });
 
+      if (!env.DB) {
+        return json({ ok: false, error: 'D1 DB not configured' }, { status: 500 });
+      }
+
       const submissionId = body.id || `sub_${Math.random().toString(16).slice(2)}`;
       const now = new Date().toISOString();
 
       await env.DB.prepare(
         `INSERT INTO submissions
-          (id, name, description, languages, tags, githubUrl, demoUrl, author, submittedAt, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+          (id, name, description, languages, tags, githubUrl, demoUrl, screenshotDataUrl, author, submittedAt, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
       ).bind(
         submissionId,
         body.name || 'unnamed',
@@ -105,6 +134,7 @@ export default {
         (body.tags || []).join(','),
         body.githubUrl || null,
         body.demoUrl || null,
+        body.screenshotDataUrl || null,
         body.author || 'unknown',
         (body.submittedAt || now).slice(0, 10)
       ).run();

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   tags TEXT NOT NULL,
   githubUrl TEXT,
   demoUrl TEXT,
+  screenshotDataUrl TEXT,
   author TEXT NOT NULL,
   submittedAt TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending','approved'))
