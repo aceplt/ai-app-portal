@@ -249,9 +249,34 @@ function getReviewStats(appId) {
   return { count: reviews.length, avg };
 }
 
+function isLikelyGitHubRepoInput(s) {
+  const t = String(s || '').trim();
+  if (!t) return false;
+  // Accept:
+  // - https://github.com/<owner>/<repo>
+  // - http://github.com/<owner>/<repo>
+  // - github.com/<owner>/<repo>
+  // - <owner>/<repo>
+  return (
+    /^https?:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*\/?$/.test(t) ||
+    /^github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*\/?$/.test(t) ||
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(t)
+  );
+}
+
 async function fetchGitHubSecurity(githubUrl) {
   let apiUrl = '';
   try {
+    if (!isLikelyGitHubRepoInput(githubUrl)) {
+      return {
+        ok: false,
+        error: 'Invalid GitHub repo URL. Use https://github.com/<owner>/<repo>',
+        securityConfidence: null,
+        status: null,
+        apiUrl: null,
+        raw: null
+      };
+    }
     // Use admin-provided base URL (localStorage) with safe normalization.
     const baseRaw = String(getApiBaseUrl() || '').trim();
 
