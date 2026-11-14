@@ -264,6 +264,65 @@ function isLikelyGitHubRepoInput(s) {
   );
 }
 
+function normalizeMaybeUrl(raw) {
+  let t = String(raw || '').trim();
+  if (!t) return '';
+
+  // Fix common copy/paste mistakes like `http:\github.com/...`
+  // by converting backslashes to forward slashes first.
+  t = t.replace(/\\/g, '/');
+
+  const lower = t.toLowerCase();
+  // After backslash->slash, `http:\github.com/...` becomes `http:/github.com/...`
+  if (lower.startsWith('http:/')) {
+    t = 'https://' + t.slice('http:/'.length);
+  }
+  if (lower.startsWith('http://')) {
+    t = 'https://' + t.slice('http://'.length);
+  }
+
+  // If already has protocol, keep it
+  if (/^https?:\/\//i.test(t)) return t;
+
+  // Otherwise, treat as host/path and prefix https://
+  return 'https://' + t;
+}
+
+function normalizeGitHubRepoInput(raw) {
+  let t = String(raw || '').trim();
+  if (!t) return '';
+
+  t = t.replace(/\\/g, '/');
+
+  // If user typed just owner/repo
+  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(t)) {
+    return 'https://github.com/' + t;
+  }
+
+  // If user typed github.com/owner/repo
+  if (/^github\.com\//i.test(t)) {
+    return 'https://' + t;
+  }
+
+  // If user typed http(s)://github.com/...
+  if (/^https?:\/\/github\.com\//i.test(t)) {
+    return t.replace(/^http:\/\//i, 'https://');
+  }
+
+  // If the user typed something weird that still contains github.com/owner/repo
+  const m = t.match(/github\.com\/(.+)$/i);
+  if (m && m[1]) {
+    const tail = m[1].replace(/\.git$/i, '');
+    // Expect owner/repo
+    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/.test(tail)) {
+      const parts = tail.split('/');
+      return 'https://github.com/' + parts[0] + '/' + parts[1];
+    }
+  }
+
+  return t;
+}
+
 async function fetchGitHubSecurity(githubUrl) {
   let apiUrl = '';
   try {
@@ -431,6 +490,15 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
   list.forEach(app => {
     const card = el('div', { class: 'app-card' });
     card.appendChild(el('h3', {}, [app.name]));
+
+    if (app.screenshotDataUrl) {
+      const img = el('img', {
+        src: app.screenshotDataUrl,
+        alt: app.name + ' screenshot',
+        style: 'width:100%; max-height:220px; object-fit:cover; border-radius:12px; margin-top:10px;'
+      });
+      card.appendChild(img);
+    }
 
     const metaPieces = [];
     metaPieces.push('by ' + (app.author || 'unknown'));
@@ -738,6 +806,16 @@ function onAppsPage() {
     }
   }
 
+  const allCats = uniq(all.flatMap(a => a.tags || [])).sort();
+  for (const c of allCats) {
+    if (!Array.from(category?.options || []).some(o => o.value === c)) {
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      category.appendChild(opt);
+    }
+  }
+
   const apply = () => {
     autoApprovePending(getAutoConfig())
 
@@ -746,8 +824,10 @@ function onAppsPage() {
 
     const q = (query?.value || '').trim().toLowerCase();
     const lf = (lang?.value || '').trim();
+    const cf = (category?.value || '').trim();
 
     let filtered = merged;
+    if (cf) filtered = filtered.filter(a => (a.tags || []).includes(cf));
     if (lf) filtered = filtered.filter(a => (a.languages || []).includes(lf));
     if (q) {
       filtered = filtered.filter(a =>
@@ -786,6 +866,7 @@ function onAppsPage() {
 
   apply();
   query?.addEventListener('input', apply);
+  category?.addEventListener('change', apply);
   lang?.addEventListener('change', apply);
   btn?.addEventListener('click', apply);
 }
@@ -798,10 +879,31 @@ function onSubmitPage() {
   const status = document.getElementById('submitStatus');
   if (!form || !status) return;
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const fd = new FormData(form);
+
+    const fileToDataUrl = (file) =>
+      new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+
+    const screenshotInput = form.querySelector('input[name="screenshotFile"]');
+    const file = screenshotInput?.files?.[0] || null;
+    let screenshotDataUrl = null;
+    if (file) {
+      const maxBytes = 750 * 1024;
+      if (file.size > maxBytes) {
+        status.textContent = 'Screenshot is too large. Upload an image under ~750KB.';
+        return;
+      }
+      status.textContent = 'Uploading screenshot...';
+      screenshotDataUrl = await fileToDataUrl(file);
+    }
     const name = fd.get('name');
     const description = fd.get('description');
     const languages = fd.get('languages');
@@ -816,8 +918,9 @@ function onSubmitPage() {
       description: String(description || '').trim(),
       languages: String(languages || '').split(',').map(s => s.trim()).filter(Boolean),
       tags: String(tags || '').split(',').map(s => s.trim()).filter(Boolean),
-      githubUrl: String(githubUrl || '').trim() || null,
-      demoUrl: String(demoUrl || '').trim() || null,
+      githubUrl: normalizeGitHubRepoInput(String(githubUrl || '')) || null,
+      demoUrl: normalizeMaybeUrl(String(demoUrl || '')) || null,
+      screenshotDataUrl,
       author: String(author || '').trim(),
       submittedAt: new Date().toISOString().slice(0, 10),
       status: 'pending'
