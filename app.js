@@ -75,7 +75,7 @@ const STORAGE_REVIEWS_KEY = 'aicn_reviews';
 const STORAGE_REVIEWED_KEY = 'aicn_reviewed';
 const STORAGE_API_BASE_URL_KEY = 'aicn_api_base_url'; // optional override
 
-const DEFAULT_GITHUB_WORKER_BASE = 'https://aicreateappnews-backend.plural-sceptre.workers.dev';
+const DEFAULT_GITHUB_WORKER_BASE = 'https://aicreateappnews-backend.automatic-beetle.workers.dev';
 
 function getApiBaseUrl() {
   // If empty, use same-origin relative /api/... (requires Workers routing).
@@ -250,20 +250,21 @@ function getReviewStats(appId) {
 }
 
 async function fetchGitHubSecurity(githubUrl) {
-  // Always call the known deployed worker origin.
-  // This avoids failures caused by bad/truncated localStorage values.
   let apiUrl = '';
   try {
-    const origin = (() => {
-      try {
-        return new URL(DEFAULT_GITHUB_WORKER_BASE).origin;
-      } catch {
-        return DEFAULT_GITHUB_WORKER_BASE;
-      }
-    })();
+    // Use admin-provided base URL (localStorage) with safe normalization.
+    const baseRaw = String(getApiBaseUrl() || '').trim();
+
+    // Allow inputs like:
+    // - https://worker...workers.dev
+    // - https://worker...workers.dev/
+    // - https://worker...workers.dev/api  (we’ll strip trailing /api)
+    const base = baseRaw
+      .replace(/\/+$/, '')
+      .replace(/\/api$/i, '');
 
     apiUrl =
-      origin.replace(/\/+$/, '') +
+      base +
       '/api/security-check' +
       '?githubUrl=' + encodeURIComponent(githubUrl);
 
