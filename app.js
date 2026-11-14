@@ -589,6 +589,19 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
           return;
         }
 
+        const cfg = getAutoConfig();
+        const minNeeded = cfg.minAvgRating;
+        const isLow = rating < minNeeded;
+
+        const dependabot = res?.raw?.openDependabotAlerts;
+        const vulns = res?.raw?.openVulnerabilityAlerts;
+        const dependabotPart = Number.isFinite(dependabot)
+          ? `Dependabot alerts: ${dependabot}. `
+          : '';
+        const vulnPart = Number.isFinite(vulns)
+          ? `Vulnerability alerts: ${vulns}. `
+          : '';
+
         // Save as this user's security confidence review (counts toward auto-approve gate)
         const userKey = ensureUserKey();
         const reviews = loadReviews();
@@ -596,7 +609,9 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
         reviews.unshift({
           appId: app.id,
           rating,
-          text: 'Auto from GitHub security alerts (confidence).',
+          text: isLow
+            ? `GitHub security is LOW (confidence ${rating}/5). ${dependabotPart}${vulnPart}Recommendation: do not auto-approve; require manual review.`
+            : `GitHub security looks OK (confidence ${rating}/5). ${dependabotPart}${vulnPart}Recommendation: eligible for auto-approve gate.`,
           userKey,
           author: 'you',
           submittedAt: new Date().toISOString().slice(0, 10)
@@ -607,8 +622,10 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
         reviewedSet2.add(app.id);
         saveReviewedSet(reviewedSet2);
 
-        secStatus.textContent = `GitHub security confidence: ${rating}/5`;
-        securityBtn.textContent = 'GitHub checked ✅';
+        secStatus.textContent = isLow
+          ? `GitHub security confidence: ${rating}/5 (LOW — auto-approve requires ≥ ${minNeeded}).`
+          : `GitHub security confidence: ${rating}/5`;
+        securityBtn.textContent = isLow ? 'GitHub checked ⚠️' : 'GitHub checked ✅';
 
         if (typeof onReview === 'function') onReview(app.id);
       });
