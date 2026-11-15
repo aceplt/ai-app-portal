@@ -993,16 +993,37 @@ function onAdminPage() {
 
   const render = async () => {
     const cfg = getAutoConfig();
-    const subs = loadSubmissions();
-    const pending = subs.filter(s => s.status === 'pending');
+
+    let pending = [];
+    const apiBase = String(apiBaseInput?.value || '').trim().replace(/\/+$/, '');
+
+    // If API base is set, prefer backend D1 truth
+    if (apiBase) {
+      try {
+        const res = await fetch(apiBase + '/api/admin/pending?limit=200');
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(data?.items)) {
+          pending = data.items;
+        }
+      } catch {
+        // ignore -> demo fallback below
+      }
+    }
+
+    // Demo fallback: localStorage
+    if (!pending.length) {
+      const subs = loadSubmissions();
+      pending = subs.filter(s => s.status === 'pending');
+    }
+
 
     autoStatus.textContent =
-      `Auto-approve demo is ON. ` +
+      `${apiBase ? 'Auto-approve backend mode' : 'Auto-approve demo mode'}. ` +
       `Min votes: ${cfg.minVotes}, ` +
       `Min reviews: ${cfg.minReviews}, ` +
       `Avg security confidence ≥ ${cfg.minAvgRating}, ` +
       `Min age: ${cfg.minAgeHours}h. ` +
-      `Local stored submissions: ${subs.length}. Pending: ${pending.length}.`;
+      `Pending submissions: ${pending.length}.`;
 
     out.innerHTML = '';
     if (!pending.length) {
