@@ -995,7 +995,10 @@ function onAdminPage() {
     const cfg = getAutoConfig();
 
     let pending = [];
-    const apiBase = String(apiBaseInput?.value || '').trim().replace(/\/+$/, '');
+    const apiBase = String(apiBaseInput?.value || '')
+      .trim()
+      .replace(/\/+$/, '')
+      .replace(/\/api$/, '');
 
     // If API base is set, prefer backend D1 truth
     if (apiBase) {
@@ -1050,11 +1053,11 @@ function onAdminPage() {
       row.appendChild(el('div', { class: 'item-meta' }, [`Avg security confidence: ${rs.avg.toFixed(1)} (need ${cfg.minAvgRating})`]));
 
       // If user set API base URL, add backend vote + auto-approve button
-      if (apiBaseInput?.value) {
+      if (apiBase) {
         const btn = el('button', { class: 'btn btn-small', style: 'margin-top:8px' }, ['Vote + auto-approve (backend)']);
         btn.addEventListener('click', async () => {
           const userKey = ensureUserKey();
-          const apiBase = getApiBaseUrl().replace(/\/+$/, '');
+          const apiBase = apiBase;
 
           await fetch(apiBase + '/api/votes', {
             method: 'POST',
