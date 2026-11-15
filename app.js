@@ -991,7 +991,7 @@ function onAdminPage() {
   const clearBtn = document.getElementById('clearDemo');
   const apiBaseInput = document.getElementById('apiBaseInput');
 
-  const render = () => {
+  const render = async () => {
     const cfg = getAutoConfig();
     const subs = loadSubmissions();
     const pending = subs.filter(s => s.status === 'pending');
@@ -1027,6 +1027,31 @@ function onAdminPage() {
       const rs = getReviewStats(item.id);
       row.appendChild(el('div', { class: 'item-meta' }, [`Reviews: ${rs.count} (need ${cfg.minReviews})`]));
       row.appendChild(el('div', { class: 'item-meta' }, [`Avg security confidence: ${rs.avg.toFixed(1)} (need ${cfg.minAvgRating})`]));
+
+      // If user set API base URL, add backend vote + auto-approve button
+      if (apiBaseInput?.value) {
+        const btn = el('button', { class: 'btn btn-small', style: 'margin-top:8px' }, ['Vote + auto-approve (backend)']);
+        btn.addEventListener('click', async () => {
+          const userKey = ensureUserKey();
+          const apiBase = getApiBaseUrl().replace(/\/+$/, '');
+
+          await fetch(apiBase + '/api/votes', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ submissionId: item.id, userKey })
+          }).catch(() => null);
+
+          const threshold = Number(thresholdInput?.value || cfg.minVotes || 1);
+          await fetch(apiBase + '/api/admin/run-auto-approve', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ threshold })
+          }).catch(() => null);
+
+          render();
+        });
+        row.appendChild(btn);
+      }
 
       out.appendChild(row);
     });

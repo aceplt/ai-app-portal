@@ -86,28 +86,56 @@ export default {
       }
 
       const status = String(searchParams.get('status') || 'approved');
-      const res = await env.DB.prepare(
-        `SELECT * FROM submissions
-         WHERE status = ?
-         ORDER BY submittedAt DESC
-         LIMIT ?`
-      ).bind(status, limit).all();
+      try {
+        const res = await env.DB.prepare(
+          `SELECT * FROM submissions
+           WHERE status = ?
+           ORDER BY submittedAt DESC
+           LIMIT ?`
+        ).bind(status, limit).all();
 
-      const items = (res.results as any[]).map(r => ({
-        id: r.id,
-        name: r.name,
-        description: r.description,
-        languages: String(r.languages || '').split(',').filter(Boolean),
-        tags: String(r.tags || '').split(',').filter(Boolean),
-        githubUrl: r.githubUrl || null,
-        demoUrl: r.demoUrl || null,
-        screenshotDataUrl: r.screenshotDataUrl || null,
-        author: r.author,
-        submittedAt: r.submittedAt,
-        status: r.status
-      }));
+        const items = (res.results as any[]).map(r => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          languages: String(r.languages || '').split(',').filter(Boolean),
+          tags: String(r.tags || '').split(',').filter(Boolean),
+          githubUrl: r.githubUrl || null,
+          demoUrl: r.demoUrl || null,
+          screenshotDataUrl: r.screenshotDataUrl || null,
+          author: r.author,
+          submittedAt: r.submittedAt,
+          status: r.status
+        }));
 
-      return json({ items, limit });
+        return json({ items, limit });
+      } catch (e: any) {
+        return json({ ok: false, error: 'd1_apps_failed', details: String(e?.message || e) }, { status: 500 });
+      }
+    }
+
+    // --- Debug D1 schema (safe, no secrets) ---
+    if (request.method === 'GET' && pathname === '/api/debug-d1') {
+      if (!env.DB) {
+        return json({ ok: false, error: 'D1 DB not configured' }, { status: 500 });
+      }
+
+      try {
+        const tables = await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`).all();
+        const tableNames = (tables.results as any[]).map(r => r.name);
+
+        let submissionsCols: any[] = [];
+        try {
+          const cols = await env.DB.prepare(`PRAGMA table_info(submissions)`).all();
+          submissionsCols = cols.results as any[];
+        } catch {
+          submissionsCols = [];
+        }
+
+        return json({ ok: true, tableNames, submissionsCols });
+      } catch (e: any) {
+        return json({ ok: false, error: 'debug_failed', details: String(e?.message || e) }, { status: 500 });
+      }
     }
 
     // --- Submissions ---
@@ -122,24 +150,28 @@ export default {
       const submissionId = body.id || `sub_${Math.random().toString(16).slice(2)}`;
       const now = new Date().toISOString();
 
-      await env.DB.prepare(
-        `INSERT INTO submissions
-          (id, name, description, languages, tags, githubUrl, demoUrl, screenshotDataUrl, author, submittedAt, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
-      ).bind(
-        submissionId,
-        body.name || 'unnamed',
-        body.description || '',
-        (body.languages || []).join(','),
-        (body.tags || []).join(','),
-        body.githubUrl || null,
-        body.demoUrl || null,
-        body.screenshotDataUrl || null,
-        body.author || 'unknown',
-        (body.submittedAt || now).slice(0, 10)
-      ).run();
+      try {
+        await env.DB.prepare(
+          `INSERT INTO submissions
+            (id, name, description, languages, tags, githubUrl, demoUrl, screenshotDataUrl, author, submittedAt, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+        ).bind(
+          submissionId,
+          body.name || 'unnamed',
+          body.description || '',
+          (body.languages || []).join(','),
+          (body.tags || []).join(','),
+          body.githubUrl || null,
+          body.demoUrl || null,
+          body.screenshotDataUrl || null,
+          body.author || 'unknown',
+          (body.submittedAt || now).slice(0, 10)
+        ).run();
 
-      return json({ ok: true, submissionId });
+        return json({ ok: true, submissionId });
+      } catch (e: any) {
+        return json({ ok: false, error: 'd1_insert_submission_failed', details: String(e?.message || e) }, { status: 500 });
+      }
     }
 
     // --- Votes (demo) ---
