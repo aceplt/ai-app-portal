@@ -2,51 +2,42 @@
 
 Frontend portal for `aicreateappnews.com`.
 
-## What’s working now (frontend demo)
+## What’s working now
 
-- **Apps directory**: shows approved apps + locally submitted apps.
-- **Voting (demo)**: visitors can “Upvote” apps. Votes are stored in the browser (`localStorage`).
-- **Auto-approve (demo)**: when a pending submission reaches the vote threshold, it flips to **Approved** and appears in the main directory.
-- **Admin (placeholder)**: shows pending submissions + current vote counts and can run auto-approve (demo).
+- **Apps directory**: shows approved apps (from Cloudflare D1 worker when connected, plus local submissions) with real community like counts.
+- **Likes system**: visitors can click "❤️ Like" on apps. Likes are persisted to Cloudflare D1 with duplicate prevention per user/IP.
+- **Auto-approve**: when a pending submission reaches the like threshold (default: 5 likes), it automatically gets **Approved** and featured in the apps directory.
+- **Admin portal**:
+  - View pending submissions with live like counts from D1.
+  - One-click actions per submission: **Like**, **Approve**, **Reject**, or **Delete**.
+  - Configure like threshold and run batch auto-approval.
+  - Optional `ADMIN_KEY` authentication header support (`Bearer <token>` / `x-admin-key`).
 - **AI News feed**: filters by keyword and **source** (demo dropdown).
 
 Files:
 - `apps.html`, `submit.html`, `admin.html`, `news.html`
 - `app.js`
 
-## Pages
+## Pages Deployment
 
-Because this is static HTML/CSS/JS, it can be deployed directly to **Cloudflare Pages** (no build required).
-
-Deploy:
+Because this is static HTML/CSS/JS, it can be deployed directly to **Cloudflare Pages** (no build required):
 1. Create a Cloudflare Pages project.
-2. Connect your Git repo (or import this folder).
+2. Connect your Git repo (`ai-app-portal`).
 3. Set build setting to **"Static (no build)"**.
 4. Add custom domain `aicreateappnews.com` in Pages.
 5. Update DNS in your registrar to point to Cloudflare.
 
-## Backend integration (next step)
+## Backend Endpoints (Cloudflare Workers + D1)
 
-This frontend expects backend endpoints on **Cloudflare Workers** (and a database on **Cloudflare D1**):
-
+- `GET /api/health` → `{ ok: true, service: "aicreateappnews-backend" }`
 - `GET /api/news?limit=20&source=...` → `{ items: [{title, summary, url, publishedAt, source}] }`
-- `GET /api/apps?limit=20` → `{ items: [{name, description, languages, tags, githubUrl, demoUrl, author, submittedAt}] }`
-- `POST /api/submissions` → `{ ok: true, submissionId }`
-- `POST /api/votes` → upvote submission/app (prevents duplicate votes per user)
-- `GET /api/admin/pending`
-- `POST /api/admin/run-auto-approve` (or approve specific submissions)
-
-### Workers + D1 starter skeleton
-
-I added a **starter** Workers/D1 skeleton under `backend/`:
-- `backend/wrangler.toml`
-- `backend/src/index.ts`
-- `backend/src/db.ts`
-- `backend/d1-schema.sql`
-
-It currently returns **stub news** and has placeholder endpoints for apps/submissions/votes/admin so you can wire the real logic next.
-
-## Notes / limitations
-
-- Current voting + auto-approve is **browser-local demo**.
-- For real moderation (“busting”), approvals, and multi-user voting, wire the frontend to the Workers API + D1 and add proper auth/rate limits.
+- `GET /api/apps?limit=20&status=approved` → `{ items: [{id, name, description, languages, tags, githubUrl, demoUrl, author, submittedAt, status, likes}] }`
+- `POST /api/submissions` → `{ ok: true, submissionId }` (validates types, handles upsert/conflicts)
+- `POST /api/likes` (and `POST /api/votes`) → `{ ok: true, submissionId, likes, votes }` (IP + userKey duplicate prevention)
+- `GET /api/likes?submissionId=...` → `{ ok: true, submissionId, likes }`
+- `GET /api/admin/pending` → `{ items: [...] }` (includes live like counts, protected by `ADMIN_KEY` if set)
+- `POST /api/admin/run-auto-approve` → `{ ok: true, changed, threshold }`
+- `POST /api/admin/approve` → `{ ok: true, id, status: "approved" }`
+- `POST /api/admin/reject` → `{ ok: true, id, status: "rejected" }`
+- `POST /api/admin/delete` → `{ ok: true, id }` (deletes submission & associated likes)
+- `POST /api/admin/clean-qa` → `{ ok: true, deleted: N }`

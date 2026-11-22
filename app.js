@@ -1,6 +1,5 @@
-// Frontend portal demo
-// Uses local sample data + localStorage for submissions + voting.
-// Later: connect to Cloudflare Workers + database.
+// Frontend portal for AI Create App News
+// Supports connected backend (Cloudflare Workers + D1) with offline/localStorage fallback.
 
 const sampleNews = [
   {
@@ -37,7 +36,8 @@ const sampleApps = [
     demoUrl: 'https://example.com/app-radar',
     author: 'alice',
     submittedAt: '2026-11-11',
-    status: 'approved'
+    status: 'approved',
+    likes: 12
   },
   {
     id: 'news_miner',
@@ -49,7 +49,8 @@ const sampleApps = [
     demoUrl: 'https://example.com/news-miner',
     author: 'bob',
     submittedAt: '2026-11-10',
-    status: 'approved'
+    status: 'approved',
+    likes: 8
   },
   {
     id: 'codeforge_cpp',
@@ -61,28 +62,41 @@ const sampleApps = [
     demoUrl: 'https://example.com/codeforge-cpp',
     author: 'charlie',
     submittedAt: '2026-11-09',
-    status: 'approved'
+    status: 'approved',
+    likes: 5
   }
 ];
 
 const STORAGE_SUBMISSIONS_KEY = 'aicn_submissions';
 const STORAGE_SUBMISSIONS_FALLBACK_KEY = 'aicn_pending_submissions';
-const STORAGE_VOTES_KEY = 'aicn_votes'; // { [appId]: number }
-const STORAGE_VOTED_KEY = 'aicn_voted'; // Set-ish array
+const STORAGE_LIKES_KEY = 'aicn_likes';
+const STORAGE_VOTES_KEY = 'aicn_votes'; // backwards compat
+const STORAGE_LIKED_KEY = 'aicn_liked';
+const STORAGE_VOTED_KEY = 'aicn_voted'; // backwards compat
 const STORAGE_AUTO_THRESHOLD_KEY = 'aicn_auto_threshold';
 const STORAGE_USER_KEY = 'aicn_user';
 const STORAGE_REVIEWS_KEY = 'aicn_reviews';
 const STORAGE_REVIEWED_KEY = 'aicn_reviewed';
-const STORAGE_API_BASE_URL_KEY = 'aicn_api_base_url'; // optional override
+const STORAGE_API_BASE_URL_KEY = 'aicn_api_base_url';
+const STORAGE_ADMIN_KEY = 'aicn_admin_key';
 
-const DEFAULT_GITHUB_WORKER_BASE = 'https://aicreateappnews-backend.automatic-beetle.workers.dev';
+const DEFAULT_WORKER_BASE = 'https://aicreateappnews-backend.automatic-beetle.workers.dev';
 
 function getApiBaseUrl() {
-  // If empty, use same-origin relative /api/... (requires Workers routing).
-  // If set (ex: https://<worker>.<acct>.workers.dev), we call that instead.
-  // For now we also default to the currently deployed workers.dev Worker.
   const stored = String(localStorage.getItem(STORAGE_API_BASE_URL_KEY) || '').trim();
-  return stored || DEFAULT_GITHUB_WORKER_BASE;
+  return stored || DEFAULT_WORKER_BASE;
+}
+
+function getAdminKey() {
+  return String(localStorage.getItem(STORAGE_ADMIN_KEY) || '').trim();
+}
+
+function getAdminHeaders() {
+  const key = getAdminKey();
+  return {
+    'content-type': 'application/json',
+    ...(key ? { 'authorization': `Bearer ${key}`, 'x-admin-key': key } : {})
+  };
 }
 
 function formatDate(s) {
@@ -113,14 +127,11 @@ function el(tag, attrs = {}, children = []) {
 }
 
 function loadSubmissions() {
-  const raw = localStorage.getItem(STORAGE_SUBMISSIONS_KEY);
-  const fallbackRaw = localStorage.getItem(STORAGE_SUBMISSIONS_FALLBACK_KEY);
-  const rawToUse = raw ?? fallbackRaw;
-  if (!rawToUse) return [];
+  const raw = localStorage.getItem(STORAGE_SUBMISSIONS_KEY) || localStorage.getItem(STORAGE_SUBMISSIONS_FALLBACK_KEY);
+  if (!raw) return [];
   try {
-    const subs = JSON.parse(rawToUse);
+    const subs = JSON.parse(raw);
     if (!Array.isArray(subs)) return [];
-    // Normalize
     return subs.map(s => ({
       status: s.status || 'pending',
       ...s,
@@ -135,22 +146,23 @@ function saveSubmissions(subs) {
   localStorage.removeItem(STORAGE_SUBMISSIONS_FALLBACK_KEY);
 }
 
-function loadVotes() {
+function loadLikes() {
   try {
-    const raw = localStorage.getItem(STORAGE_VOTES_KEY);
+    const raw = localStorage.getItem(STORAGE_LIKES_KEY) || localStorage.getItem(STORAGE_VOTES_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
 }
 
-function saveVotes(votes) {
-  localStorage.setItem(STORAGE_VOTES_KEY, JSON.stringify(votes));
+function saveLikes(likes) {
+  localStorage.setItem(STORAGE_LIKES_KEY, JSON.stringify(likes));
+  localStorage.setItem(STORAGE_VOTES_KEY, JSON.stringify(likes));
 }
 
-function loadVoted() {
+function loadLikedSet() {
   try {
-    const raw = localStorage.getItem(STORAGE_VOTED_KEY);
+    const raw = localStorage.getItem(STORAGE_LIKED_KEY) || localStorage.getItem(STORAGE_VOTED_KEY);
     const arr = raw ? JSON.parse(raw) : [];
     return new Set(arr);
   } catch {
@@ -158,8 +170,16 @@ function loadVoted() {
   }
 }
 
-function saveVoted(set) {
-  localStorage.setItem(STORAGE_VOTED_KEY, JSON.stringify([...set]));
+function saveLikedSet(set) {
+  const arr = [...set];
+  localStorage.setItem(STORAGE_LIKED_KEY, JSON.stringify(arr));
+  localStorage.setItem(STORAGE_VOTED_KEY, JSON.stringify(arr));
+}
+
+function getLikeCount(appId, serverLikes) {
+  if (typeof serverLikes === 'number') return serverLikes;
+  const likes = loadLikes();
+  return Number(likes[appId] || 0);
 }
 
 function getAutoThreshold() {
@@ -174,8 +194,8 @@ function setAutoThreshold(n) {
 
 function getAutoMinReviews() {
   const raw = localStorage.getItem('aicn_auto_min_reviews');
-  const n = raw ? Number(raw) : 10;
-  return Number.isFinite(n) && n >= 0 ? n : 10;
+  const n = raw ? Number(raw) : 0;
+  return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
 function setAutoMinReviews(n) {
@@ -194,8 +214,8 @@ function setAutoMinAvgRating(n) {
 
 function getAutoMinAgeHours() {
   const raw = localStorage.getItem('aicn_auto_min_age_hours');
-  const n = raw ? Number(raw) : 2;
-  return Number.isFinite(n) && n >= 0 ? n : 2;
+  const n = raw ? Number(raw) : 0;
+  return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
 function setAutoMinAgeHours(n) {
@@ -252,11 +272,6 @@ function getReviewStats(appId) {
 function isLikelyGitHubRepoInput(s) {
   const t = String(s || '').trim();
   if (!t) return false;
-  // Accept:
-  // - https://github.com/<owner>/<repo>
-  // - http://github.com/<owner>/<repo>
-  // - github.com/<owner>/<repo>
-  // - <owner>/<repo>
   return (
     /^https?:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*\/?$/.test(t) ||
     /^github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*\/?$/.test(t) ||
@@ -267,53 +282,37 @@ function isLikelyGitHubRepoInput(s) {
 function normalizeMaybeUrl(raw) {
   let t = String(raw || '').trim();
   if (!t) return '';
-
-  // Fix common copy/paste mistakes like `http:\github.com/...`
-  // by converting backslashes to forward slashes first.
   t = t.replace(/\\/g, '/');
 
   const lower = t.toLowerCase();
-  // After backslash->slash, `http:\github.com/...` becomes `http:/github.com/...`
   if (lower.startsWith('http:/')) {
     t = 'https://' + t.slice('http:/'.length);
   }
   if (lower.startsWith('http://')) {
     t = 'https://' + t.slice('http://'.length);
   }
-
-  // If already has protocol, keep it
   if (/^https?:\/\//i.test(t)) return t;
-
-  // Otherwise, treat as host/path and prefix https://
   return 'https://' + t;
 }
 
 function normalizeGitHubRepoInput(raw) {
   let t = String(raw || '').trim();
   if (!t) return '';
-
   t = t.replace(/\\/g, '/');
 
-  // If user typed just owner/repo
   if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(t)) {
     return 'https://github.com/' + t;
   }
-
-  // If user typed github.com/owner/repo
   if (/^github\.com\//i.test(t)) {
     return 'https://' + t;
   }
-
-  // If user typed http(s)://github.com/...
   if (/^https?:\/\/github\.com\//i.test(t)) {
     return t.replace(/^http:\/\//i, 'https://');
   }
 
-  // If the user typed something weird that still contains github.com/owner/repo
   const m = t.match(/github\.com\/(.+)$/i);
   if (m && m[1]) {
     const tail = m[1].replace(/\.git$/i, '');
-    // Expect owner/repo
     if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/.test(tail)) {
       const parts = tail.split('/');
       return 'https://github.com/' + parts[0] + '/' + parts[1];
@@ -336,22 +335,10 @@ async function fetchGitHubSecurity(githubUrl) {
         raw: null
       };
     }
-    // Use admin-provided base URL (localStorage) with safe normalization.
     const baseRaw = String(getApiBaseUrl() || '').trim();
+    const base = baseRaw.replace(/\/+$/, '').replace(/\/api$/i, '');
 
-    // Allow inputs like:
-    // - https://worker...workers.dev
-    // - https://worker...workers.dev/
-    // - https://worker...workers.dev/api  (we’ll strip trailing /api)
-    const base = baseRaw
-      .replace(/\/+$/, '')
-      .replace(/\/api$/i, '');
-
-    apiUrl =
-      base +
-      '/api/security-check' +
-      '?githubUrl=' + encodeURIComponent(githubUrl);
-
+    apiUrl = base + '/api/security-check?githubUrl=' + encodeURIComponent(githubUrl);
     const resp = await fetch(apiUrl, {
       method: 'GET',
       mode: 'cors',
@@ -382,13 +369,9 @@ async function fetchGitHubSecurity(githubUrl) {
   }
 }
 
-function getVoteCount(appId) {
-  const votes = loadVotes();
-  return Number(votes[appId] || 0);
-}
-
 function getAutoConfig() {
   return {
+    minLikes: getAutoThreshold(),
     minVotes: getAutoThreshold(),
     minReviews: getAutoMinReviews(),
     minAvgRating: getAutoMinAvgRating(),
@@ -396,9 +379,10 @@ function getAutoConfig() {
   };
 }
 
-function shouldAutoApprove(submission, reviewStats, voteCount, cfg) {
+function shouldAutoApprove(submission, reviewStats, likes, cfg) {
   if (submission.status !== 'pending') return false;
-  if (voteCount < cfg.minVotes) return false;
+  const threshold = cfg.minLikes ?? cfg.minVotes ?? 5;
+  if (likes < threshold) return false;
   if (reviewStats.count < cfg.minReviews) return false;
   if (reviewStats.avg < cfg.minAvgRating) return false;
 
@@ -413,10 +397,9 @@ function shouldAutoApprove(submission, reviewStats, voteCount, cfg) {
 
 function autoApprovePending(cfg) {
   const subs = loadSubmissions();
-  const votes = loadVotes();
+  const likes = loadLikes();
   const reviews = loadReviews();
 
-  // Pre-group reviews by appId for speed
   const reviewByApp = new Map();
   for (const r of reviews) {
     if (!reviewByApp.has(r.appId)) reviewByApp.set(r.appId, []);
@@ -434,9 +417,9 @@ function autoApprovePending(cfg) {
   let changed = false;
   const next = subs.map(s => {
     if (s.status !== 'pending') return s;
-    const vc = Number(votes[s.id] || 0);
+    const lk = Number(likes[s.id] || 0);
     const rs = reviewStatsByApp.get(s.id) || { count: 0, avg: 0 };
-    if (shouldAutoApprove(s, rs, vc, cfg)) {
+    if (shouldAutoApprove(s, rs, lk, cfg)) {
       changed = true;
       return { ...s, status: 'approved' };
     }
@@ -484,7 +467,7 @@ function renderNews(list, container) {
   });
 }
 
-function renderApps(list, container, { enableVoting = false, onVote = null, onReview = null } = {}) {
+function renderApps(list, container, { enableLikes = true, onLike = null, onReview = null } = {}) {
   container.innerHTML = '';
 
   list.forEach(app => {
@@ -513,9 +496,11 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
     if (rs.count > 0) {
       badges.appendChild(el('span', { class:'badge' }, [`${rs.avg.toFixed(1)}★ Sec (${rs.count} reviews)`]));
     }
-    if (enableVoting) {
-      badges.appendChild(el('span', { class: 'badge' }, [getVoteCount(app.id) + ' votes']));
-    }
+
+    const currentLikes = getLikeCount(app.id, app.likes);
+    badges.appendChild(el('span', { class: 'badge', id: `likeBadge_${app.id}` }, [
+      currentLikes === 1 ? '❤️ 1 like' : `❤️ ${currentLikes} likes`
+    ]));
 
     (app.languages || []).forEach(l => badges.appendChild(el('span', { class: 'badge' }, [l])));
     card.appendChild(badges);
@@ -536,30 +521,35 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
       card.appendChild(links);
     }
 
-    if (enableVoting) {
-      const voted = loadVoted();
-      const already = voted.has(app.id);
+    if (enableLikes) {
+      const likedSet = loadLikedSet();
+      const already = likedSet.has(app.id);
       const cfg = getAutoConfig();
 
-      const voteRow = el('div', { class: 'form-row', style: 'margin-top:12px' });
-      const voteBtn = el('button', { class: 'btn btn-small', disabled: already ? 'disabled' : undefined }, [already ? 'Voted ✅' : 'Upvote']);
+      const likeRow = el('div', { class: 'form-row', style: 'margin-top:12px; align-items:center' });
+      const likeBtn = el('button', {
+        class: 'btn btn-small',
+        disabled: already ? 'disabled' : undefined
+      }, [already ? '❤️ Liked' : '🤍 Like']);
 
-      voteBtn.addEventListener('click', () => {
-        if (voted.has(app.id)) return;
+      likeBtn.addEventListener('click', async () => {
+        if (likedSet.has(app.id)) return;
+        likeBtn.disabled = true;
+        likeBtn.textContent = '❤️ Liked';
 
-        if (typeof onVote === 'function') {
-          onVote(app.id);
-          return;
+        if (typeof onLike === 'function') {
+          await onLike(app.id);
         }
       });
 
-      voteRow.appendChild(voteBtn);
-      voteRow.appendChild(
+      likeRow.appendChild(likeBtn);
+      likeRow.appendChild(
         el('div', { class: 'item-meta', style: 'margin-left:10px' }, [
-          `Auto-approve demo: votes ≥ ${cfg.minVotes}, reviews ≥ ${cfg.minReviews}, rating ≥ ${cfg.minAvgRating}`
-        ]
-      ));
-      card.appendChild(voteRow);
+          `Auto-approve threshold: likes ≥ ${cfg.minLikes}` +
+          (cfg.minReviews > 0 ? `, reviews ≥ ${cfg.minReviews}` : '')
+        ])
+      );
+      card.appendChild(likeRow);
 
       const reviewedSet = loadReviewedSet();
       const alreadyReviewed = reviewedSet.has(app.id);
@@ -583,7 +573,7 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
 
       const reviewText = document.createElement('textarea');
       reviewText.className = 'textarea';
-      reviewText.rows = 3;
+      reviewText.rows = 2;
       reviewText.placeholder = 'Risk notes (why you trust/don’t trust this app)';
 
       const reviewBtn = el(
@@ -597,18 +587,14 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
 
         const rating = Number(ratingSel.value);
         const text = String(reviewText.value || '').trim();
-        if (!Number.isFinite(rating) || rating < 1 || rating > 5) return;
-        if (text.length < 5) return;
 
-        const userKey = ensureUserKey();
         const reviews = loadReviews();
         reviews.unshift({
+          id: 'rev_' + Math.random().toString(16).slice(2),
           appId: app.id,
           rating,
           text,
-          userKey,
-          author: 'you',
-          submittedAt: new Date().toISOString().slice(0, 10)
+          createdAt: new Date().toISOString()
         });
         saveReviews(reviews);
 
@@ -616,91 +602,11 @@ function renderApps(list, container, { enableVoting = false, onVote = null, onRe
         saveReviewedSet(reviewedSet);
 
         if (typeof onReview === 'function') onReview(app.id);
-
-        reviewText.value = '';
       });
 
       reviewWrap.appendChild(ratingSel);
       reviewWrap.appendChild(reviewText);
       reviewWrap.appendChild(reviewBtn);
-
-      const securityBtn = el(
-        'button',
-        {
-          class: 'btn btn-small',
-          style: 'margin-top:8px',
-          disabled: alreadyReviewed || !app.githubUrl ? 'disabled' : undefined
-        },
-        ['Check GitHub security']
-      );
-
-      const secStatus = el('div', { class: 'item-meta', style: 'margin-top:6px; opacity:0.9' }, ['']);
-
-      securityBtn.addEventListener('click', async () => {
-        securityBtn.textContent = 'Checking...';
-        secStatus.textContent = 'Working...';
-
-        const res = await fetchGitHubSecurity(app.githubUrl);
-        if (!res.ok) {
-          const detail = res?.status ? ` (${res.status})` : '';
-          const urlLine = res?.apiUrl ? `\nURL: ${res.apiUrl}` : '';
-          const debugLine = res?.debug ? `\nDebug: ${res.debug}` : '';
-          secStatus.textContent = `Worker call failed${detail}: ${res.error || 'failed'}${urlLine}${debugLine}`;
-          securityBtn.textContent = 'Check GitHub security';
-          return;
-        }
-
-        const rating = Number(res.securityConfidence);
-        if (!Number.isFinite(rating)) {
-          secStatus.textContent = 'No GitHub signal found.';
-          securityBtn.textContent = 'Check GitHub security';
-          return;
-        }
-
-        const cfg = getAutoConfig();
-        const minNeeded = cfg.minAvgRating;
-        const isLow = rating < minNeeded;
-
-        const dependabot = res?.raw?.openDependabotAlerts;
-        const vulns = res?.raw?.openVulnerabilityAlerts;
-        const dependabotPart = Number.isFinite(dependabot)
-          ? `Dependabot alerts: ${dependabot}. `
-          : '';
-        const vulnPart = Number.isFinite(vulns)
-          ? `Vulnerability alerts: ${vulns}. `
-          : '';
-
-        // Save as this user's security confidence review (counts toward auto-approve gate)
-        const userKey = ensureUserKey();
-        const reviews = loadReviews();
-
-        reviews.unshift({
-          appId: app.id,
-          rating,
-          text: isLow
-            ? `GitHub security is LOW (confidence ${rating}/5). ${dependabotPart}${vulnPart}Recommendation: do not auto-approve; require manual review.`
-            : `GitHub security looks OK (confidence ${rating}/5). ${dependabotPart}${vulnPart}Recommendation: eligible for auto-approve gate.`,
-          userKey,
-          author: 'you',
-          submittedAt: new Date().toISOString().slice(0, 10)
-        });
-        saveReviews(reviews);
-
-        const reviewedSet2 = loadReviewedSet();
-        reviewedSet2.add(app.id);
-        saveReviewedSet(reviewedSet2);
-
-        secStatus.textContent = isLow
-          ? `GitHub security confidence: ${rating}/5 (LOW — auto-approve requires ≥ ${minNeeded}).`
-          : `GitHub security confidence: ${rating}/5`;
-        securityBtn.textContent = isLow ? 'GitHub checked ⚠️' : 'GitHub checked ✅';
-
-        if (typeof onReview === 'function') onReview(app.id);
-      });
-
-      reviewWrap.appendChild(securityBtn);
-      reviewWrap.appendChild(secStatus);
-
       card.appendChild(reviewWrap);
     }
 
@@ -712,19 +618,13 @@ function onIndexPage() {
   const year = document.getElementById('year');
   if (year) year.textContent = new Date().getFullYear();
 
-  const newsList = document.getElementById('newsList');
-  const appsList = document.getElementById('appsList');
+  const newsOut = document.getElementById('newsList');
+  if (newsOut) renderNews(sampleNews.slice(0, 3), newsOut);
 
-  if (newsList) renderNews(sampleNews.slice(0, 2), newsList);
-
-  if (appsList) {
+  const appsOut = document.getElementById('appsList');
+  if (appsOut) {
     const { approved } = getAllApps();
-    const ranked = [...approved].sort((a, b) => {
-      const dv = getVoteCount(b.id) - getVoteCount(a.id);
-      if (dv !== 0) return dv;
-      return String(b.submittedAt || '').localeCompare(String(a.submittedAt || ''));
-    });
-    renderApps(ranked.slice(0, 2), appsList, { enableVoting: false });
+    renderApps(approved.slice(0, 4), appsOut, { enableLikes: false });
   }
 }
 
@@ -733,18 +633,15 @@ function onNewsPage() {
   if (year) year.textContent = new Date().getFullYear();
 
   const input = document.getElementById('newsQuery');
-  const btn = document.getElementById('newsRefresh');
-  const sourceSel = document.getElementById('newsSourceFilter');
+  const btn = document.getElementById('newsSearch');
+  const sourceSel = document.getElementById('newsSource');
   const out = document.getElementById('newsListFull');
   if (!out) return;
 
-  const all = [...sampleNews].sort((a, b) => (b.publishedAt || '').localeCompare(a.publishedAt || ''));
-
-  // Populate sources dropdown (demo)
+  const all = [...sampleNews];
   if (sourceSel) {
-    const sources = uniq(all.map(n => n.source || 'Unknown')).sort();
+    const sources = uniq(all.map(n => n.source)).sort();
     sourceSel.innerHTML = '';
-
     const optAll = document.createElement('option');
     optAll.value = 'all';
     optAll.textContent = 'All sources';
@@ -780,23 +677,80 @@ function onNewsPage() {
   btn?.addEventListener('click', apply);
 }
 
-function onAppsPage() {
+async function fetchBackendApps() {
+  const apiBase = getApiBaseUrl();
+  if (!apiBase) return [];
+  try {
+    const base = apiBase.replace(/\/+$/, '').replace(/\/api$/i, '');
+    const res = await fetch(base + '/api/apps?status=approved&limit=100');
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => ({}));
+    return Array.isArray(data?.items) ? data.items : [];
+  } catch {
+    return [];
+  }
+}
+
+async function sendLikeToBackend(appId) {
+  const apiBase = getApiBaseUrl();
+  if (!apiBase) return null;
+  try {
+    const base = apiBase.replace(/\/+$/, '').replace(/\/api$/i, '');
+    const userKey = ensureUserKey();
+    const res = await fetch(base + '/api/likes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ submissionId: appId, userKey })
+    });
+    if (!res.ok) return null;
+    return await res.json().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function onAppsPage() {
   const year = document.getElementById('year');
   if (year) year.textContent = new Date().getFullYear();
 
-  // Apply on visit (demo auto-approve)
-  autoApprovePending(getAutoConfig())
+  autoApprovePending(getAutoConfig());
 
   const query = document.getElementById('appsQuery');
   const lang = document.getElementById('langFilter');
+  const category = document.getElementById('categoryFilter');
   const btn = document.getElementById('appsRefresh');
   const out = document.getElementById('appsListFull');
   if (!out) return;
 
-  const { approved, pending } = getAllApps();
-  const all = [...pending, ...approved];
+  // Fetch approved apps from backend worker
+  const backendApproved = await fetchBackendApps();
 
-  const allLangs = uniq(all.flatMap(a => a.languages || [])).sort();
+  const { approved, pending } = getAllApps();
+
+  // Merge backend approved apps with local apps, de-duping by ID
+  const knownIds = new Set();
+  const allMerged = [];
+
+  for (const a of backendApproved) {
+    if (!knownIds.has(a.id)) {
+      knownIds.add(a.id);
+      allMerged.push({ ...a, status: 'approved' });
+    }
+  }
+  for (const a of approved) {
+    if (!knownIds.has(a.id)) {
+      knownIds.add(a.id);
+      allMerged.push(a);
+    }
+  }
+  for (const p of pending) {
+    if (!knownIds.has(p.id)) {
+      knownIds.add(p.id);
+      allMerged.push(p);
+    }
+  }
+
+  const allLangs = uniq(allMerged.flatMap(a => a.languages || [])).sort();
   for (const l of allLangs) {
     if (!Array.from(lang?.options || []).some(o => o.value === l)) {
       const opt = document.createElement('option');
@@ -806,7 +760,7 @@ function onAppsPage() {
     }
   }
 
-  const allCats = uniq(all.flatMap(a => a.tags || [])).sort();
+  const allCats = uniq(allMerged.flatMap(a => a.tags || [])).sort();
   for (const c of allCats) {
     if (!Array.from(category?.options || []).some(o => o.value === c)) {
       const opt = document.createElement('option');
@@ -817,16 +771,13 @@ function onAppsPage() {
   }
 
   const apply = () => {
-    autoApprovePending(getAutoConfig())
-
-    const { approved: ap, pending: pn } = getAllApps();
-    const merged = [...pn, ...ap];
+    autoApprovePending(getAutoConfig());
 
     const q = (query?.value || '').trim().toLowerCase();
     const lf = (lang?.value || '').trim();
     const cf = (category?.value || '').trim();
 
-    let filtered = merged;
+    let filtered = allMerged;
     if (cf) filtered = filtered.filter(a => (a.tags || []).includes(cf));
     if (lf) filtered = filtered.filter(a => (a.languages || []).includes(lf));
     if (q) {
@@ -835,26 +786,34 @@ function onAppsPage() {
       );
     }
 
-    // Sort: approved first, then by votes desc
+    // Sort: approved first, then by likes desc
     filtered = filtered.sort((a, b) => {
       const apv = (a.status || 'approved') === 'approved' ? 0 : 1;
       const bpv = (b.status || 'approved') === 'approved' ? 0 : 1;
       if (apv !== bpv) return apv - bpv;
-      return getVoteCount(b.id) - getVoteCount(a.id);
+      return getLikeCount(b.id, b.likes) - getLikeCount(a.id, a.likes);
     });
 
     renderApps(filtered, out, {
-      enableVoting: true,
-      onVote: (appId) => {
-        const votes = loadVotes();
-        votes[appId] = (Number(votes[appId] || 0) + 1);
-        saveVotes(votes);
+      enableLikes: true,
+      onLike: async (appId) => {
+        // Record locally
+        const likes = loadLikes();
+        likes[appId] = (Number(likes[appId] || 0) + 1);
+        saveLikes(likes);
 
-        const voted = loadVoted();
-        voted.add(appId);
-        saveVoted(voted);
+        const likedSet = loadLikedSet();
+        likedSet.add(appId);
+        saveLikedSet(likedSet);
 
-        autoApprovePending(getAutoConfig())
+        // Sync to backend Worker
+        const backendResult = await sendLikeToBackend(appId);
+        if (backendResult?.likes) {
+          const item = allMerged.find(x => x.id === appId);
+          if (item) item.likes = backendResult.likes;
+        }
+
+        autoApprovePending(getAutoConfig());
         apply();
       },
       onReview: () => {
@@ -896,7 +855,7 @@ function onSubmitPage() {
     const file = screenshotInput?.files?.[0] || null;
     let screenshotDataUrl = null;
     if (file) {
-      const maxBytes = 40 * 1024; // keep small for D1 row safety
+      const maxBytes = 40 * 1024;
       if (file.size > maxBytes) {
         status.textContent = 'Screenshot is too large. Upload an image under ~40KB.';
         return;
@@ -930,13 +889,14 @@ function onSubmitPage() {
     subs.unshift(sub);
     saveSubmissions(subs);
 
-    // Best-effort: also save to backend DB (if D1 is configured)
+    // Save to Cloudflare Worker D1 backend
     (async () => {
       try {
         const apiBase = getApiBaseUrl();
         if (!apiBase) return;
+        const base = apiBase.replace(/\/+$/, '').replace(/\/api$/i, '');
 
-        const resp = await fetch(apiBase.replace(/\/+$/, '') + '/api/submissions', {
+        const resp = await fetch(base + '/api/submissions', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -955,7 +915,6 @@ function onSubmitPage() {
 
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data?.submissionId) {
-          // Update local copy with backend id
           const current = loadSubmissions();
           const idx = current.findIndex(x => x.id === sub.id);
           if (idx >= 0) {
@@ -964,11 +923,11 @@ function onSubmitPage() {
           }
         }
       } catch {
-        // ignore
+        // ignore offline fallback
       }
     })();
 
-    status.textContent = 'Submitted ✅ Pending approval (demo voting). Saved locally';
+    status.textContent = 'Submitted ✅ Pending community likes. Saved locally & synced to backend.';
     form.reset();
 
     setTimeout(() => { location.href = './apps.html'; }, 800);
@@ -990,6 +949,14 @@ function onAdminPage() {
   const runBtn = document.getElementById('runAutoApprove');
   const clearBtn = document.getElementById('clearDemo');
   const apiBaseInput = document.getElementById('apiBaseInput');
+  const adminKeyInput = document.getElementById('adminKeyInput');
+
+  if (thresholdInput) thresholdInput.value = String(getAutoThreshold());
+  if (minReviewsInput) minReviewsInput.value = String(getAutoMinReviews());
+  if (minRatingInput) minRatingInput.value = String(getAutoMinAvgRating());
+  if (minAgeHoursInput) minAgeHoursInput.value = String(getAutoMinAgeHours());
+  if (apiBaseInput) apiBaseInput.value = getApiBaseUrl();
+  if (adminKeyInput) adminKeyInput.value = getAdminKey();
 
   const render = async () => {
     const cfg = getAutoConfig();
@@ -1000,29 +967,33 @@ function onAdminPage() {
       .replace(/\/+$/, '')
       .replace(/\/api$/, '');
 
-    // If API base is set, prefer backend D1 truth
+    let backendOk = false;
     if (apiBase) {
       try {
-        const res = await fetch(apiBase + '/api/admin/pending?limit=200');
+        const res = await fetch(apiBase + '/api/admin/pending?limit=200', {
+          headers: getAdminHeaders()
+        });
         const data = await res.json().catch(() => ({}));
         if (res.ok && Array.isArray(data?.items)) {
           pending = data.items;
+          backendOk = true;
+        } else if (res.status === 401) {
+          autoStatus.textContent = '⚠️ 401 Unauthorized: please enter the correct Admin Secret Key above.';
+          return;
         }
       } catch {
-        // ignore -> demo fallback below
+        // fallback to local demo
       }
     }
 
-    // Demo fallback: localStorage
-    if (!pending.length) {
+    if (!backendOk) {
       const subs = loadSubmissions();
       pending = subs.filter(s => s.status === 'pending');
     }
 
-
     autoStatus.textContent =
-      `${apiBase ? 'Auto-approve backend mode' : 'Auto-approve demo mode'}. ` +
-      `Min votes: ${cfg.minVotes}, ` +
+      `${backendOk ? '⚡ Backend Connected (D1)' : '💻 Local Demo Mode'}. ` +
+      `Min likes: ${cfg.minLikes}, ` +
       `Min reviews: ${cfg.minReviews}, ` +
       `Avg security confidence ≥ ${cfg.minAvgRating}, ` +
       `Min age: ${cfg.minAgeHours}h. ` +
@@ -1043,59 +1014,98 @@ function onAdminPage() {
 
       row.appendChild(title);
       row.appendChild(el('div', { class: 'item-desc' }, [item.description]));
-      row.appendChild(el('div', { class: 'item-meta' }, ['Languages: ' + ((item.languages || []).join(', ') || '-') ]));
-      row.appendChild(el('div', { class: 'item-meta' }, ['Author: ' + (item.author || '-') ]));
+      row.appendChild(el('div', { class: 'item-meta' }, ['Languages: ' + ((item.languages || []).join(', ') || '-')]));
+      row.appendChild(el('div', { class: 'item-meta' }, ['Author: ' + (item.author || '-')]));
 
-      const votes = getVoteCount(item.id);
-      row.appendChild(el('div', { class: 'item-meta' }, [`Votes: ${votes} (need ${cfg.minVotes})`]));
+      const likes = getLikeCount(item.id, item.likes);
+      row.appendChild(el('div', { class: 'item-meta', style: 'font-weight:600' }, [
+        `❤️ Likes: ${likes} (threshold: ${cfg.minLikes})`
+      ]));
+
       const rs = getReviewStats(item.id);
       row.appendChild(el('div', { class: 'item-meta' }, [`Reviews: ${rs.count} (need ${cfg.minReviews})`]));
       row.appendChild(el('div', { class: 'item-meta' }, [`Avg security confidence: ${rs.avg.toFixed(1)} (need ${cfg.minAvgRating})`]));
 
-      // If user set API base URL, add backend vote + auto-approve button
-      if (apiBase) {
-        const btn = el('button', { class: 'btn btn-small', style: 'margin-top:8px' }, ['Vote + auto-approve (backend)']);
-        btn.addEventListener('click', async () => {
-          const userKey = ensureUserKey();
-          const apiBase = apiBase;
+      // Actions row
+      const actionRow = el('div', { class: 'form-row', style: 'margin-top:10px; gap:8px; flex-wrap:wrap;' });
 
-          await fetch(apiBase + '/api/votes', {
+      if (backendOk) {
+        // 1. Like button
+        const likeBtn = el('button', { class: 'btn btn-small' }, ['❤️ Like']);
+        likeBtn.addEventListener('click', async () => {
+          const userKey = ensureUserKey();
+          await fetch(apiBase + '/api/likes', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ submissionId: item.id, userKey })
           }).catch(() => null);
-
-          const threshold = Number(thresholdInput?.value || cfg.minVotes || 1);
-          await fetch(apiBase + '/api/admin/run-auto-approve', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ threshold })
-          }).catch(() => null);
-
           render();
         });
-        row.appendChild(btn);
+        actionRow.appendChild(likeBtn);
+
+        // 2. Direct Approve button
+        const approveBtn = el('button', { class: 'btn btn-small', style: 'background:#16a34a' }, ['✅ Approve']);
+        approveBtn.addEventListener('click', async () => {
+          await fetch(apiBase + '/api/admin/approve', {
+            method: 'POST',
+            headers: getAdminHeaders(),
+            body: JSON.stringify({ id: item.id })
+          }).catch(() => null);
+          render();
+        });
+        actionRow.appendChild(approveBtn);
+
+        // 3. Reject button
+        const rejectBtn = el('button', { class: 'btn btn-small btn-ghost', style: 'color:#ea580c' }, ['❌ Reject']);
+        rejectBtn.addEventListener('click', async () => {
+          await fetch(apiBase + '/api/admin/reject', {
+            method: 'POST',
+            headers: getAdminHeaders(),
+            body: JSON.stringify({ id: item.id })
+          }).catch(() => null);
+          render();
+        });
+        actionRow.appendChild(rejectBtn);
+
+        // 4. Delete button
+        const deleteBtn = el('button', { class: 'btn btn-small btn-ghost', style: 'color:#dc2626' }, ['🗑️ Delete']);
+        deleteBtn.addEventListener('click', async () => {
+          if (!confirm(`Permanently delete "${item.name}"?`)) return;
+          await fetch(apiBase + '/api/admin/delete', {
+            method: 'POST',
+            headers: getAdminHeaders(),
+            body: JSON.stringify({ id: item.id })
+          }).catch(() => null);
+          render();
+        });
+        actionRow.appendChild(deleteBtn);
+      } else {
+        // Local demo mode approve button
+        const demoApproveBtn = el('button', { class: 'btn btn-small' }, ['Approve (demo)']);
+        demoApproveBtn.addEventListener('click', () => {
+          const subs = loadSubmissions();
+          const target = subs.find(s => s.id === item.id);
+          if (target) {
+            target.status = 'approved';
+            saveSubmissions(subs);
+          }
+          render();
+        });
+        actionRow.appendChild(demoApproveBtn);
       }
 
+      row.appendChild(actionRow);
       out.appendChild(row);
     });
   };
 
-  if (thresholdInput) thresholdInput.value = String(getAutoThreshold());
-  if (minReviewsInput) minReviewsInput.value = String(getAutoMinReviews());
-  if (minRatingInput) minRatingInput.value = String(getAutoMinAvgRating());
-  if (minAgeHoursInput) minAgeHoursInput.value = String(getAutoMinAgeHours());
-  if (apiBaseInput) apiBaseInput.value = getApiBaseUrl();
-
-  const saveApiBase = () => {
-    localStorage.setItem(
-      STORAGE_API_BASE_URL_KEY,
-      String(apiBaseInput?.value || '').trim()
-    );
+  const saveConfig = () => {
+    localStorage.setItem(STORAGE_API_BASE_URL_KEY, String(apiBaseInput?.value || '').trim());
+    localStorage.setItem(STORAGE_ADMIN_KEY, String(adminKeyInput?.value || '').trim());
   };
-  apiBaseInput?.addEventListener('input', saveApiBase);
-  apiBaseInput?.addEventListener('change', saveApiBase);
-  apiBaseInput?.addEventListener('blur', saveApiBase);
+
+  apiBaseInput?.addEventListener('input', () => { saveConfig(); render(); });
+  adminKeyInput?.addEventListener('input', () => { saveConfig(); render(); });
 
   thresholdInput?.addEventListener('change', () => {
     const n = Number(thresholdInput.value);
@@ -1121,13 +1131,34 @@ function onAdminPage() {
     render();
   });
 
-  runBtn?.addEventListener('click', () => {
+  runBtn?.addEventListener('click', async () => {
+    const apiBase = String(apiBaseInput?.value || '').trim().replace(/\/+$/, '').replace(/\/api$/, '');
+    const threshold = Number(thresholdInput?.value || getAutoThreshold());
+
+    if (apiBase) {
+      try {
+        const resp = await fetch(apiBase + '/api/admin/run-auto-approve', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+          body: JSON.stringify({ minLikes: threshold, threshold })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok) {
+          alert(`Auto-approve complete: ${data?.changed ?? 0} submission(s) approved.`);
+        }
+      } catch (e) {
+        alert('Auto-approve backend request failed: ' + e);
+      }
+    }
+
     autoApprovePending(getAutoConfig());
     render();
   });
 
   clearBtn?.addEventListener('click', () => {
     localStorage.removeItem(STORAGE_SUBMISSIONS_KEY);
+    localStorage.removeItem(STORAGE_LIKES_KEY);
+    localStorage.removeItem(STORAGE_LIKED_KEY);
     localStorage.removeItem(STORAGE_VOTES_KEY);
     localStorage.removeItem(STORAGE_VOTED_KEY);
     localStorage.removeItem(STORAGE_REVIEWS_KEY);
@@ -1136,7 +1167,6 @@ function onAdminPage() {
     localStorage.removeItem('aicn_auto_min_reviews');
     localStorage.removeItem('aicn_auto_min_avg_rating');
     localStorage.removeItem('aicn_auto_min_age_hours');
-    localStorage.removeItem(STORAGE_API_BASE_URL_KEY);
     location.reload();
   });
 
@@ -1144,8 +1174,6 @@ function onAdminPage() {
 }
 
 function route() {
-  // Cloudflare Pages sometimes serves extensionless routes.
-  // Make routing tolerant to both `/apps.html` and `/apps`.
   const rawPath = location.pathname || '/';
   const path = rawPath.replace(/\/+$/, '');
 

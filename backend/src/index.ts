@@ -1,5 +1,18 @@
 import { NEWS_SOURCES } from './sources';
-import { autoApproveByVotes, listPendingSubmissions, upsertVote, voteCount } from './db';
+import {
+  autoApproveByLikes,
+  autoApproveByVotes,
+  cleanQaSubmissions,
+  deleteSubmission,
+  likeCount,
+  listPendingSubmissions,
+  listSubmissionsWithLikes,
+  setSubmissionStatus,
+  submissionExists,
+  upsertLike,
+  upsertVote,
+  voteCount
+} from './db';
 import { getGitHubSecuritySignal } from './github';
 
 type Json = Record<string, any>;
@@ -10,11 +23,22 @@ function json(body: any, init: ResponseInit = {}): Response {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'GET,POST,OPTIONS',
-      'access-control-allow-headers': 'content-type, accept',
+      'access-control-allow-methods': 'GET,POST,OPTIONS,DELETE',
+      'access-control-allow-headers': 'content-type, accept, authorization, x-admin-key',
       ...(init.headers || {})
     }
   });
+}
+
+function checkAdminAuth(request: Request, env: any): boolean {
+  const configuredKey = String(env.ADMIN_KEY || env.ADMIN_SECRET || '').trim();
+  // If no admin key configured in Worker env, allow access in dev/demo mode
+  if (!configuredKey) return true;
+
+  const authHeader = request.headers.get('authorization') || '';
+  const customHeader = request.headers.get('x-admin-key') || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : customHeader.trim();
+  return token === configuredKey;
 }
 
 export default {
@@ -22,14 +46,14 @@ export default {
     const url = new URL(request.url);
     const { pathname, searchParams } = url;
 
-    // Basic CORS for Pages-hosted frontend (adjust as needed)
+    // CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
         headers: {
           'access-control-allow-origin': '*',
-          'access-control-allow-methods': 'GET,POST,OPTIONS',
-          'access-control-allow-headers': 'content-type, accept'
+          'access-control-allow-methods': 'GET,POST,OPTIONS,DELETE',
+          'access-control-allow-headers': 'content-type, accept, authorization, x-admin-key'
         }
       });
     }
@@ -43,9 +67,6 @@ export default {
       const limit = Number(searchParams.get('limit') || 20);
       const source = searchParams.get('source') || null;
 
-      // TODO: query D1 news_items
-      // For now return stub if DB not ready.
-      // When wired: select where source = ? (optional).
       return json({
         items: [
           {
@@ -78,7 +99,7 @@ export default {
       });
     }
 
-    // --- Apps (approved list) ---
+    // --- Apps (approved list / directory with real like counts) ---
     if (request.method === 'GET' && pathname === '/api/apps') {
       const limit = Number(searchParams.get('limit') || 20);
       if (!env.DB) {
@@ -87,27 +108,7 @@ export default {
 
       const status = String(searchParams.get('status') || 'approved');
       try {
-        const res = await env.DB.prepare(
-          `SELECT * FROM submissions
-           WHERE status = ?
-           ORDER BY submittedAt DESC
-           LIMIT ?`
-        ).bind(status, limit).all();
-
-        const items = (res.results as any[]).map(r => ({
-          id: r.id,
-          name: r.name,
-          description: r.description,
-          languages: String(r.languages || '').split(',').filter(Boolean),
-          tags: String(r.tags || '').split(',').filter(Boolean),
-          githubUrl: r.githubUrl || null,
-          demoUrl: r.demoUrl || null,
-          screenshotDataUrl: r.screenshotDataUrl || null,
-          author: r.author,
-          submittedAt: r.submittedAt,
-          status: r.status
-        }));
-
+        const items = await listSubmissionsWithLikes(env.DB, status, limit);
         return json({ items, limit });
       } catch (e: any) {
         return json({ ok: false, error: 'd1_apps_failed', details: String(e?.message || e) }, { status: 500 });
@@ -147,25 +148,66 @@ export default {
         return json({ ok: false, error: 'D1 DB not configured' }, { status: 500 });
       }
 
-      const submissionId = body.id || `sub_${Math.random().toString(16).slice(2)}`;
-      const now = new Date().toISOString();
+      const name = String(body.name || '').trim();
+      if (!name) {
+        return json({ ok: false, error: 'name is required' }, { status: 400 });
+      }
+
+      const submissionId = String(body.id || `sub_${Math.random().toString(16).slice(2)}`).trim();
+      const description = String(body.description || '').trim();
+
+      // Normalize languages & tags (accept arrays or comma-delimited strings)
+      const rawLanguages = Array.isArray(body.languages)
+        ? body.languages
+        : typeof body.languages === 'string'
+        ? body.languages.split(',')
+        : [];
+      const languages = rawLanguages.map((s: any) => String(s).trim()).filter(Boolean).join(',');
+
+      const rawTags = Array.isArray(body.tags)
+        ? body.tags
+        : typeof body.tags === 'string'
+        ? body.tags.split(',')
+        : [];
+      const tags = rawTags.map((s: any) => String(s).trim()).filter(Boolean).join(',');
+
+      const githubUrl = body.githubUrl ? String(body.githubUrl).trim() : null;
+      const demoUrl = body.demoUrl ? String(body.demoUrl).trim() : null;
+      const author = String(body.author || 'unknown').trim();
+
+      // Enforce max screenshot data size (~500KB)
+      const rawScreenshot = body.screenshotDataUrl ? String(body.screenshotDataUrl) : null;
+      const screenshotDataUrl = rawScreenshot && rawScreenshot.length < 500000 ? rawScreenshot : null;
+
+      const submittedAt = typeof body.submittedAt === 'string' && body.submittedAt.length >= 10
+        ? body.submittedAt.slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
 
       try {
         await env.DB.prepare(
           `INSERT INTO submissions
             (id, name, description, languages, tags, githubUrl, demoUrl, screenshotDataUrl, author, submittedAt, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+           ON CONFLICT(id) DO UPDATE SET
+             name = excluded.name,
+             description = excluded.description,
+             languages = excluded.languages,
+             tags = excluded.tags,
+             githubUrl = excluded.githubUrl,
+             demoUrl = excluded.demoUrl,
+             screenshotDataUrl = coalesce(excluded.screenshotDataUrl, submissions.screenshotDataUrl),
+             author = excluded.author`
         ).bind(
           submissionId,
-          body.name || 'unnamed',
-          body.description || '',
-          (body.languages || []).join(','),
-          (body.tags || []).join(','),
-          body.githubUrl || null,
-          body.demoUrl || null,
-          body.screenshotDataUrl || null,
-          body.author || 'unknown',
-          (body.submittedAt || now).slice(0, 10)
+          name,
+          description,
+          languages,
+          tags,
+          githubUrl,
+          demoUrl,
+          screenshotDataUrl,
+          author,
+          submittedAt
         ).run();
 
         return json({ ok: true, submissionId });
@@ -174,37 +216,101 @@ export default {
       }
     }
 
-    // --- Votes (demo) ---
-    if (request.method === 'POST' && pathname === '/api/votes') {
+    // --- Likes / Voting ---
+    if (request.method === 'GET' && (pathname === '/api/likes' || pathname === '/api/votes')) {
+      const submissionId = String(searchParams.get('submissionId') || '');
+      if (!submissionId) return json({ ok: false, error: 'missing submissionId' }, { status: 400 });
+      if (!env.DB) return json({ ok: false, error: 'D1 DB not configured' }, { status: 500 });
+
+      const count = await likeCount(env.DB, submissionId);
+      return json({ ok: true, submissionId, likes: count, votes: count });
+    }
+
+    if (request.method === 'POST' && (pathname === '/api/likes' || pathname === '/api/votes')) {
       const body = (await request.json().catch(() => null)) as Json | null;
       if (!body) return json({ ok: false, error: 'invalid json' }, { status: 400 });
 
       const submissionId = String(body.submissionId || '');
       if (!submissionId) return json({ ok: false, error: 'missing submissionId' }, { status: 400 });
 
-      // Demo user identity
-      const userKey = String(body.userKey || request.headers.get('cf-connecting-ip') || 'anon');
+      if (!env.DB) return json({ ok: false, error: 'D1 DB not configured' }, { status: 500 });
 
-      await upsertVote(env.DB, submissionId, userKey);
-      const count = await voteCount(env.DB, submissionId);
+      // Verify submission exists
+      const exists = await submissionExists(env.DB, submissionId);
+      if (!exists) {
+        return json({ ok: false, error: 'submission not found' }, { status: 404 });
+      }
 
-      return json({ ok: true, submissionId, votes: count });
+      // Robust voter identity: combine client IP with optional userKey to prevent console spam
+      const ip = request.headers.get('cf-connecting-ip') || 'anon';
+      const clientKey = String(body.userKey || '').trim().slice(0, 64);
+      const voterKey = clientKey ? `${ip}:${clientKey}` : ip;
+
+      await upsertLike(env.DB, submissionId, voterKey);
+      const count = await likeCount(env.DB, submissionId);
+
+      return json({ ok: true, submissionId, likes: count, votes: count });
     }
 
-    // --- Admin ---
-    if (request.method === 'GET' && pathname === '/api/admin/pending') {
-      // TODO: auth
-      const limit = Number(searchParams.get('limit') || 100);
-      const pending = await listPendingSubmissions(env.DB, limit);
-      return json({ items: pending });
-    }
+    // --- Admin Endpoints (protected by checkAdminAuth) ---
+    if (pathname.startsWith('/api/admin/')) {
+      if (!checkAdminAuth(request, env)) {
+        return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      }
 
-    if (request.method === 'POST' && pathname === '/api/admin/run-auto-approve') {
-      // TODO: auth
-      const body = (await request.json().catch(() => ({}))) as Json;
-      const threshold = Number(body.threshold || 5);
-      const changed = await autoApproveByVotes(env.DB, threshold);
-      return json({ ok: true, changed });
+      if (!env.DB) {
+        return json({ ok: false, error: 'D1 DB not configured' }, { status: 500 });
+      }
+
+      if (request.method === 'GET' && pathname === '/api/admin/pending') {
+        const limit = Number(searchParams.get('limit') || 100);
+        const pending = await listPendingSubmissions(env.DB, limit);
+        return json({ items: pending });
+      }
+
+      if (request.method === 'POST' && pathname === '/api/admin/run-auto-approve') {
+        const body = (await request.json().catch(() => ({}))) as Json;
+        // Server enforces sensible threshold (defaults to 5, min 1)
+        const requestedThreshold = Number(body.minLikes ?? body.threshold);
+        const threshold = Number.isFinite(requestedThreshold) && requestedThreshold > 0
+          ? requestedThreshold
+          : Number(env.MIN_LIKES || 5);
+
+        const changed = await autoApproveByLikes(env.DB, threshold);
+        return json({ ok: true, changed, threshold });
+      }
+
+      if (request.method === 'POST' && pathname === '/api/admin/approve') {
+        const body = (await request.json().catch(() => ({}))) as Json;
+        const id = String(body.id || '');
+        if (!id) return json({ ok: false, error: 'missing id' }, { status: 400 });
+
+        const success = await setSubmissionStatus(env.DB, id, 'approved');
+        return json({ ok: success, id, status: 'approved' });
+      }
+
+      if (request.method === 'POST' && pathname === '/api/admin/reject') {
+        const body = (await request.json().catch(() => ({}))) as Json;
+        const id = String(body.id || '');
+        if (!id) return json({ ok: false, error: 'missing id' }, { status: 400 });
+
+        const success = await setSubmissionStatus(env.DB, id, 'rejected');
+        return json({ ok: success, id, status: 'rejected' });
+      }
+
+      if (request.method === 'POST' && (pathname === '/api/admin/delete' || pathname === '/api/admin/submissions/delete')) {
+        const body = (await request.json().catch(() => ({}))) as Json;
+        const id = String(body.id || '');
+        if (!id) return json({ ok: false, error: 'missing id' }, { status: 400 });
+
+        const success = await deleteSubmission(env.DB, id);
+        return json({ ok: success, id });
+      }
+
+      if (request.method === 'POST' && pathname === '/api/admin/clean-qa') {
+        const deleted = await cleanQaSubmissions(env.DB);
+        return json({ ok: true, deleted });
+      }
     }
 
     return json({ ok: false, error: 'not found' }, { status: 404 });
@@ -214,7 +320,6 @@ export default {
     if (controller.cron === 'ingest_news') {
       const now = new Date().toISOString();
       console.log(`[ingest_news] scheduled tick at ${now}. Sources:`, NEWS_SOURCES.map(s => s.id));
-      // TODO: persist ingestion run metadata to D1.
     }
   }
 };
